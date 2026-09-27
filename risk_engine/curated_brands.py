@@ -1,0 +1,67 @@
+"""
+Curated Brand Intelligence Knowledge Base
+Contains recognized famous and established global & tech brands for instantaneous deterministic IP risk screening.
+"""
+
+from typing import Dict, Any
+
+# Curated registry of high-visibility global and tech brands
+CURATED_BRANDS: Dict[str, Dict[str, Any]] = {
+    # Giant Famous Brands (Critical Risk if exact or close phonetic match)
+    "apple": {"category": "Consumer Tech / Hardware", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "google": {"category": "Search / Cloud / AI", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "microsoft": {"category": "Software / Cloud / OS", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "amazon": {"category": "E-Commerce / Cloud", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "meta": {"category": "Social Media / VR / AI", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "facebook": {"category": "Social Media", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "instagram": {"category": "Social Media", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "netflix": {"category": "Streaming / Media", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "tesla": {"category": "Automotive / Energy", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "twitter": {"category": "Social Media", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "tiktok": {"category": "Social Video", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "youtube": {"category": "Video Streaming", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "nvidia": {"category": "Semiconductors / AI Compute", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "intel": {"category": "Semiconductors", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "cisco": {"category": "Networking / Enterprise", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "oracle": {"category": "Enterprise Database / Cloud", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "salesforce": {"category": "CRM / Enterprise Cloud", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "adobe": {"category": "Creative Software", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "ibm": {"category": "Enterprise Tech", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "uber": {"category": "Mobility / Logistics", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "airbnb": {"category": "Hospitality", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "spotify": {"category": "Audio Streaming", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "shopify": {"category": "E-Commerce Platform", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "stripe": {"category": "Fintech / Payments", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "paypal": {"category": "Fintech / Payments", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "openai": {"category": "Artificial Intelligence", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "anthropic": {"category": "Artificial Intelligence", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "cloudflare": {"category": "Cloud / Security / CDN", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "datadog": {"category": "Observability / Cloud", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "snowflake": {"category": "Data Cloud", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "github": {"category": "Developer Platform", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "gitlab": {"category": "Developer Platform", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "figma": {"category": "Design Software", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "canva": {"category": "Design Platform", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "slack": {"category": "Enterprise Messaging", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "zoom": {"category": "Video Communications", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "twilio": {"category": "Communications API", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "notion": {"category": "Productivity / Workspace", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "linear": {"category": "Issue Tracking", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "vercel": {"category": "Frontend Cloud", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "supabase": {"category": "Backend as a Service", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "palantir": {"category": "Data Analytics / Defense", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "crowdstrike": {"category": "Cybersecurity", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "paloalto": {"category": "Cybersecurity", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "plaid": {"category": "Fintech API", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "brex": {"category": "Corporate Cards / Fintech", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "ramp": {"category": "Finance Automation", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "coinbase": {"category": "Crypto Exchange", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "binance": {"category": "Crypto Exchange", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "atlassian": {"category": "Enterprise Software", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "jira": {"category": "Project Management", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "confluence": {"category": "Team Workspace", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "trello": {"category": "Project Management", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "godaddy": {"category": "Domain Registrar / Web Hosting", "status": "FAMOUS_BRAND", "risk": "CRITICAL"},
+    "namecheap": {"category": "Domain Registrar", "status": "ESTABLISHED_BRAND", "risk": "HIGH"},
+    "verisign": {"category": "Registry Operator", "status": "FAMOUS_BRAND", "risk": "CRITICAL"}
+}

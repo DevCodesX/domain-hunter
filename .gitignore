@@ -1,0 +1,29 @@
+# Environments and secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local cache & data dumps
+*.json
+!requirements.txt
+
+# OS generated files
+.DS_Store
+Thumbs.db

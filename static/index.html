@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Domain Hunter ◈ AI Domain Intelligence Command Center</title>
+    <meta name="description" content="AI-powered command center and domain intelligence engine for autonomous research, candidate generation, and authoritative Verisign RDAP availability verification.">
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome 6 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Core Visual Identity CSS -->
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-shell">
+        <!-- SIDEBAR -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-brand">
+                <a href="/" class="brand-wrapper" data-route="/">
+                    <div class="brand-icon-box">
+                        ◈
+                    </div>
+                    <div class="brand-info">
+                        <div class="brand-title">DOMAIN <span>HUNTER</span></div>
+                        <div class="brand-subtitle">AI DOMAIN INTELLIGENCE</div>
+                    </div>
+                </a>
+                <button class="btn-sidebar-toggle" id="btn-sidebar-toggle" title="Toggle Sidebar (Collapse/Expand)" aria-label="Toggle Sidebar">
+                    <i class="fa-solid fa-chevron-left"></i>
+                </button>
+            </div>
+
+            <nav class="sidebar-nav">
+                <!-- Group: MAIN -->
+                <div class="nav-group">
+                    <div class="nav-group-title">MAIN</div>
+                    <ul class="nav-list">
+                        <li>
+                            <a href="/" class="nav-item-link" data-route="/" id="nav-dashboard">
+                                <i class="fa-solid fa-gauge-high"></i>
+                                <span>Dashboard</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/hunt" class="nav-item-link" data-route="/hunt" id="nav-hunt">
+                                <i class="fa-solid fa-crosshairs"></i>
+                                <span>Domain Hunt</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/history" class="nav-item-link" data-route="/history" id="nav-history">
+                                <i class="fa-solid fa-box-archive"></i>
+                                <span>Domain History</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/analytics" class="nav-item-link" data-route="/analytics" id="nav-analytics">
+                                <i class="fa-solid fa-chart-line"></i>
+                                <span>Analytics</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Group: TOOLS -->
+                <div class="nav-group">
+                    <div class="nav-group-title">TOOLS</div>
+                    <ul class="nav-list">
+                        <li>
+                            <a href="/hunt" class="nav-item-link" data-route="/hunt" id="nav-generate">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                <span>Generate Domains</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/scanner" class="nav-item-link" data-route="/scanner" id="nav-scanner">
+                                <i class="fa-solid fa-shield-halved"></i>
+                                <span>Availability Scanner</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/export" class="nav-item-link" data-route="/export" id="nav-export">
+                                <i class="fa-solid fa-file-export"></i>
+                                <span>Export Center</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Group: SYSTEM -->
+                <div class="nav-group">
+                    <div class="nav-group-title">SYSTEM</div>
+                    <ul class="nav-list">
+                        <li>
+                            <a href="/providers" class="nav-item-link" data-route="/providers" id="nav-providers">
+                                <i class="fa-solid fa-network-wired"></i>
+                                <span>AI Providers</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/logs" class="nav-item-link" data-route="/logs" id="nav-logs">
+                                <i class="fa-solid fa-terminal"></i>
+                                <span>Activity Logs</span>
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/settings" class="nav-item-link" data-route="/settings" id="nav-settings">
+                                <i class="fa-solid fa-sliders"></i>
+                                <span>Settings</span>
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="system-status-indicator">
+                    <span class="status-dot"></span>
+                    <span id="sidebar-status-text">SYSTEM ONLINE</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN VIEWPORT WRAPPER -->
+        <div class="app-main">
+            <!-- TOPBAR -->
+            <header class="topbar">
+                <div class="topbar-left">
+                    <button class="btn-mobile-menu" id="btn-mobile-menu" aria-label="Open Navigation Menu">
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                    <div class="page-title-box">
+                        <div class="breadcrumb" id="topbar-breadcrumb">DOMAIN HUNTER / <span>DASHBOARD</span></div>
+                        <h1 class="page-title" id="topbar-title">Command Center</h1>
+                    </div>
+                </div>
+
+                <div class="topbar-right">
+                    <div class="live-hunt-pill" id="live-hunt-pill">
+                        <i class="fa-solid fa-circle-notch fa-spin"></i>
+                        <span>HUNT RUNNING</span>
+                    </div>
+
+                    <button class="btn btn-primary" id="btn-topbar-run-hunt" title="Trigger Manual AI Domain Hunt">
+                        <i class="fa-solid fa-bolt"></i>
+                        <span>RUN HUNT NOW</span>
+                    </button>
+
+                    <button class="btn-icon" id="btn-global-refresh" title="Refresh Data">
+                        <i class="fa-solid fa-rotate-right"></i>
+                    </button>
+
+                    <div class="topbar-clock" id="topbar-clock">
+                        <i class="fa-regular fa-clock"></i>
+                        <span id="clock-display">00:00:00 UTC</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- MAIN CONTENT VIEWPORT -->
+            <main class="content-viewport" id="content-viewport">
+
+                <!-- ========================================== -->
+                <!-- VIEW 1: DASHBOARD (Command Center)        -->
+                <!-- ========================================== -->
+                <section class="page-view active" id="view-dashboard">
+                    <!-- Metrics 4-Pack -->
+                    <div class="metrics-grid">
+                        <div class="metric-card accent-purple">
+                            <div class="metric-icon-box"><i class="fa-solid fa-calendar-day"></i></div>
+                            <div class="metric-data">
+                                <span class="metric-label">Last 24 Hours</span>
+                                <span class="metric-value" id="metric-24h">-</span>
+                            </div>
+                        </div>
+                        <div class="metric-card accent-cyan">
+                            <div class="metric-icon-box"><i class="fa-solid fa-calendar-week"></i></div>
+                            <div class="metric-data">
+                                <span class="metric-label">Last 7 Days</span>
+                                <span class="metric-value" id="metric-7d">-</span>
+                            </div>
+                        </div>
+                        <div class="metric-card accent-green">
+                            <div class="metric-icon-box"><i class="fa-solid fa-calendar-alt"></i></div>
+                            <div class="metric-data">
+                                <span class="metric-label">Last 30 Days</span>
+                                <span class="metric-value" id="metric-30d">-</span>
+                            </div>
+                        </div>
+                        <div class="metric-card accent-amber">
+                            <div class="metric-icon-box"><i class="fa-solid fa-database"></i></div>
+                            <div class="metric-data">
+                                <span class="metric-label">Total Verified</span>
+                                <span class="metric-value" id="metric-total">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Layout: Left Column (Feed & Opportunities) + Right Column (CLI Terminal & Daily Status) -->
+                    <div style="display: grid; grid-template-columns: 1.8fr 1.2fr; gap: 1.5rem; align-items: start;">
+                        <!-- Left Column -->
+                        <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                            <!-- Latest Verified Opportunities -->
+                            <div class="panel">
+                                <div class="section-header">
+                                    <div>
+                                        <div class="section-title">
+                                            <i class="fa-solid fa-shield-halved" style="color: var(--success);"></i>
+                                            Latest Verified Opportunities
+                                        </div>
+                                        <div class="section-desc">Authoritative registry verified AVAILABLE_STANDARD .com domains</div>
+                                    </div>
+                                    <a href="/history" class="btn btn-secondary" data-route="/history" style="font-size: 0.78rem;">
+                                        <span>View All History</span> <i class="fa-solid fa-arrow-right"></i>
+                                    </a>
+                                </div>
+
+                                <!-- Tier Filtering Tabs -->
+                                <div class="quick-tabs" id="dash-tier-tabs" style="margin-top: 0.75rem; margin-bottom: 0.5rem;">
+                                    <button class="tab-btn active" data-tier="all">ALL OPPORTUNITIES</button>
+                                    <button class="tab-btn" data-tier="TIER_A"><i class="fa-solid fa-star" style="color: var(--warning); margin-right: 3px;"></i> TIER A (High Conviction)</button>
+                                    <button class="tab-btn" data-tier="TIER_B"><i class="fa-solid fa-bolt" style="color: var(--secondary); margin-right: 3px;"></i> TIER B (Strong)</button>
+                                    <button class="tab-btn" data-tier="WATCHLIST"><i class="fa-solid fa-eye" style="color: var(--text-muted); margin-right: 3px;"></i> WATCHLIST</button>
+                                </div>
+
+                                <div id="dashboard-verified-container" class="domain-cards-grid">
+                                    <div style="grid-column: 1/-1; text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                                        <i class="fa-solid fa-circle-notch fa-spin fa-2x" style="margin-bottom: 0.75rem; color: var(--primary);"></i>
+                                        <p>Loading verified domain opportunities...</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Extracted AI Startup Concepts Feed -->
+                            <div class="panel">
+                                <div class="section-header">
+                                    <div>
+                                        <div class="section-title">
+                                            <i class="fa-solid fa-microscope" style="color: var(--secondary);"></i>
+                                            Discovered Trend Concepts
+                                        </div>
+                                        <div class="section-desc">Emerging market thesis extracted by AI pipeline</div>
+                                    </div>
+                                </div>
+                                <div id="dashboard-concepts-container" style="display: flex; flex-direction: column; gap: 0.75rem;">
+                                    <div style="color: var(--text-muted); font-size: 0.85rem;">Loading trend intelligence...</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Right Column -->
+                        <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                            <!-- Daily Hunt Quick Status Card -->
+                            <div class="panel">
+                                <div class="section-header">
+                                    <div class="section-title">
+                                        <i class="fa-solid fa-radar" style="color: var(--warning);"></i>
+                                        Daily Hunt Status
+                                    </div>
+                                    <span class="status-pill available" id="dash-hunt-status-pill">IDLE</span>
+                                </div>
+                                
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem;">
+                                    <div style="background: rgba(8,10,18,0.5); padding: 0.65rem; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+                                        <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Last Run</div>
+                                        <div style="font-family: var(--font-mono); font-size: 0.82rem; font-weight: 600; color: #fff; margin-top: 2px;" id="dash-last-run">-</div>
+                                    </div>
+                                    <div style="background: rgba(8,10,18,0.5); padding: 0.65rem; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+                                        <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase;">Next Run</div>
+                                        <div style="font-family: var(--font-mono); font-size: 0.82rem; font-weight: 600; color: var(--secondary); margin-top: 2px;" id="dash-next-run">Daily 03:00</div>
+                                    </div>
+                                </div>
+
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; font-size: 0.78rem;">
+                                    <span style="color: var(--text-muted);">Current Stage:</span>
+                                    <span style="font-family: var(--font-mono); font-weight: 600; color: var(--warning);" id="dash-stage-text">idle</span>
+                                </div>
+
+                                <div class="progress-track" style="margin-bottom: 1rem;">
+                                    <div class="progress-fill" id="dash-progress-fill" style="width: 0%;"></div>
+                                </div>
+
+                                <button class="btn btn-primary" id="btn-dash-run-hunt" style="width: 100%;">
+                                    <i class="fa-solid fa-bolt"></i>
+                                    <span>RUN HUNT NOW</span>
+                                </button>
+                            </div>
+
+                            <!-- Visual CLI Terminal Component -->
+                            <div class="terminal-box">
+                                <div class="terminal-header">
+                                    <div class="terminal-dots">
+                                        <span class="terminal-dot red"></span>
+                                        <span class="terminal-dot yellow"></span>
+                                        <span class="terminal-dot green"></span>
+                                    </div>
+                                    <div class="terminal-title">
+                                        <i class="fa-solid fa-terminal"></i> domain-hunter ~ core-cli
+                                    </div>
+                                    <div class="terminal-actions">
+                                        <button class="btn-terminal-action" id="btn-copy-terminal" title="Copy Logs">
+                                            <i class="fa-regular fa-copy"></i>
+                                        </button>
+                                        <button class="btn-terminal-action" id="btn-clear-terminal" title="Clear Console">
+                                            <i class="fa-solid fa-ban"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="terminal-body" id="terminal-body">
+                                    <!-- Dynamic logs stream injected here -->
+                                    <div class="terminal-line">
+                                        <span class="t-prompt">&gt;</span>
+                                        <span>initializing domain hunter command center...</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ========================================== -->
+                <!-- VIEW 2: DOMAIN HUNT (/hunt)                -->
+                <!-- ========================================== -->
+                <section class="page-view" id="view-hunt">
+                    <div class="hunt-hero-panel">
+                        <div class="hunt-hero-top">
+                            <div>
+                                <h2 style="font-size: 1.4rem; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 0.6rem;">
+                                    <i class="fa-solid fa-crosshairs" style="color: var(--primary);"></i>
+                                    AI Domain Hunting Pipeline
+                                </h2>
+                                <p style="font-size: 0.88rem; color: var(--text-muted); margin-top: 0.2rem;">
+                                    Unified autonomous pipeline for trend ingestion, deep startup concept extraction, candidate generation, and Verisign RDAP registration filtering.
+                                </p>
+                            </div>
+                            <button class="btn btn-primary" id="btn-hero-run-hunt" style="padding: 0.65rem 1.4rem; font-size: 0.95rem;">
+                                <i class="fa-solid fa-bolt"></i>
+                                <span>⚡ RUN HUNT NOW</span>
+                            </button>
+                        </div>
+
+                        <!-- Live Pipeline Counters -->
+                        <div class="hunt-meta-grid">
+                            <div class="hunt-meta-item">
+                                <div class="label">Pipeline Status</div>
+                                <div class="val" id="hunt-status-val">IDLE</div>
+                            </div>
+                            <div class="hunt-meta-item">
+                                <div class="label">Candidates Generated</div>
+                                <div class="val" id="hunt-stat-generated">0</div>
+                            </div>
+                            <div class="hunt-meta-item">
+                                <div class="label">Availability Checked</div>
+                                <div class="val" id="hunt-stat-checked">0</div>
+                            </div>
+                            <div class="hunt-meta-item">
+                                <div class="label" style="color: var(--success);">✓ Available Standard</div>
+                                <div class="val" style="color: var(--success);" id="hunt-stat-available">0</div>
+                            </div>
+                            <div class="hunt-meta-item">
+                                <div class="label" style="color: var(--danger);">✗ Registered</div>
+                                <div class="val" style="color: var(--danger);" id="hunt-stat-registered">0</div>
+                            </div>
+                            <div class="hunt-meta-item">
+                                <div class="label" style="color: var(--warning);">★ Premium Rejections</div>
+                                <div class="val" style="color: var(--warning);" id="hunt-stat-premium">0</div>
+                            </div>
+                        </div>
+
+                        <!-- Pipeline 11-Stage Stepper -->
+                        <div class="pipeline-stepper-box">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                                <div style="font-size: 0.8rem; font-weight: 600; color: #fff;">
+                                    <i class="fa-solid fa-gears"></i> STAGE BREAKDOWN: <span id="hunt-stage-name" style="color: var(--secondary); font-family: var(--font-mono);">IDLE</span>
+                                </div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);" id="hunt-pct-text">0%</div>
+                            </div>
+
+                            <div class="pipeline-stepper" id="hunt-stepper">
+                                <div class="pipeline-step" id="step-research"><i class="fa-solid fa-chart-line"></i><span>1. Research</span></div>
+                                <div class="pipeline-step" id="step-concept_extraction"><i class="fa-solid fa-microscope"></i><span>2. Concepts</span></div>
+                                <div class="pipeline-step" id="step-candidate_generation"><i class="fa-solid fa-brain"></i><span>3. Generation</span></div>
+                                <div class="pipeline-step" id="step-candidate_validation"><i class="fa-solid fa-spell-check"></i><span>4. Validation</span></div>
+                                <div class="pipeline-step" id="step-availability_check"><i class="fa-solid fa-shield-halved"></i><span>5. RDAP Check</span></div>
+                                <div class="pipeline-step" id="step-premium_check"><i class="fa-solid fa-tag"></i><span>6. Premium Filter</span></div>
+                                <div class="pipeline-step" id="step-quality_filter"><i class="fa-solid fa-filter"></i><span>7. Gate Filter</span></div>
+                                <div class="pipeline-step" id="step-scoring"><i class="fa-solid fa-star-half-stroke"></i><span>8. Scoring</span></div>
+                                <div class="pipeline-step" id="step-final_selection"><i class="fa-solid fa-award"></i><span>9. Final Top 10</span></div>
+                                <div class="pipeline-step" id="step-saving_results"><i class="fa-solid fa-database"></i><span>10. Persisting</span></div>
+                                <div class="pipeline-step" id="step-completed"><i class="fa-solid fa-circle-check"></i><span>11. Completed</span></div>
+                            </div>
+
+                            <div class="hunt-progress-wrapper">
+                                <div class="progress-track">
+                                    <div class="progress-fill" id="hunt-progress-fill" style="width: 0%;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Verified Opportunities Section -->
+                    <div class="panel">
+                        <div class="section-header">
+                            <div>
+                                <div class="section-title">
+                                    <i class="fa-solid fa-award" style="color: var(--success);"></i>
+                                    Verified Opportunities from Current Run
+                                </div>
+                                <div class="section-desc">Domains guaranteed available for standard registration through official registry RDAP</div>
+                            </div>
+                        </div>
+
+                        <!-- Tier Filtering Tabs -->
+                        <div class="quick-tabs" id="hunt-tier-tabs" style="margin-top: 0.75rem; margin-bottom: 0.5rem;">
+                            <button class="tab-btn active" data-tier="all">ALL OPPORTUNITIES</button>
+                            <button class="tab-btn" data-tier="TIER_A"><i class="fa-solid fa-star" style="color: var(--warning); margin-right: 3px;"></i> TIER A (High Conviction)</button>
+                            <button class="tab-btn" data-tier="TIER_B"><i class="fa-solid fa-bolt" style="color: var(--secondary); margin-right: 3px;"></i> TIER B (Strong)</button>
+                            <button class="tab-btn" data-tier="WATCHLIST"><i class="fa-solid fa-eye" style="color: var(--text-muted); margin-right: 3px;"></i> WATCHLIST</button>
+                        </div>
+
+                        <div id="hunt-domains-container" class="domain-cards-grid">
+                            <div style="grid-column: 1/-1; text-align: center; padding: 3rem; color: var(--text-muted);">
+                                <i class="fa-solid fa-clock-rotate-left fa-2x" style="margin-bottom: 0.75rem; opacity: 0.5;"></i>
+                                <p>Loading run opportunities...</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ========================================== -->
+                <!-- VIEW 3: DOMAIN HISTORY (/history)          -->
+                <!-- ========================================== -->
+                <section class="page-view" id="view-history">
+                    <!-- History Controls Bar -->
+                    <div class="table-controls-bar">
+                        <div class="filter-row">
+                            <!-- Quick Filter Tabs -->
+                            <div class="quick-tabs" id="history-quick-tabs">
+                                <button class="tab-btn active" data-tab="all">ALL</button>
+                                <button class="tab-btn" data-tab="today">TODAY</button>
+                                <button class="tab-btn" data-tab="7d">7 DAYS</button>
+                                <button class="tab-btn" data-tab="30d">30 DAYS</button>
+                                <button class="tab-btn" data-tab="custom">CUSTOM</button>
+                            </div>
+
+                            <!-- Search Input -->
+                            <input type="text" class="input-control" id="history-search" placeholder="Search domain name..." style="min-width: 180px;">
+
+                            <!-- Category Filter -->
+                            <select class="input-control" id="history-category-filter">
+                                <option value="">All Categories</option>
+                                <option value="TECHNOLOGY">Technology</option>
+                                <option value="BUSINESS">Business</option>
+                                <option value="STARTUP">Startup</option>
+                            </select>
+
+                            <!-- Sort Filter -->
+                            <select class="input-control" id="history-sort-filter">
+                                <option value="newest">Newest First</option>
+                                <option value="oldest">Oldest First</option>
+                            </select>
+
+                            <!-- Limit -->
+                            <select class="input-control" id="history-limit-filter">
+                                <option value="25">25 per page</option>
+                                <option value="50" selected>50 per page</option>
+                                <option value="100">100 per page</option>
+                                <option value="250">250 per page</option>
+                            </select>
+                        </div>
+
+                        <!-- Bulk Actions -->
+                        <div class="filter-row">
+                            <span style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);" id="history-selection-counter">0 selected</span>
+                            <button class="btn btn-secondary" id="history-btn-clear-selection" style="display: none; padding: 0.35rem 0.65rem; font-size: 0.78rem;">Clear</button>
+                            <a href="/export" class="btn btn-primary" data-route="/export" style="padding: 0.4rem 0.85rem; font-size: 0.8rem;">
+                                <i class="fa-solid fa-download"></i> <span>Export</span>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- History Table -->
+                    <div class="table-responsive">
+                        <table class="data-table" id="history-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 38px;"><input type="checkbox" id="history-select-all-page" title="Select all on this page"></th>
+                                    <th>Domain</th>
+                                    <th>Status</th>
+                                    <th>Scores (Overall / Brand / Trend / Comm)</th>
+                                    <th>Category</th>
+                                    <th>Discovered At</th>
+                                    <th style="text-align: right;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-table-body">
+                                <tr>
+                                    <td colspan="7" style="text-align: center; padding: 3rem; color: var(--text-muted);">
+                                        <i class="fa-solid fa-spinner fa-spin fa-2x" style="margin-bottom: 0.75rem; color: var(--primary);"></i>
+                                        <p>Loading domain history from Supabase...</p>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Pagination -->
+                    <div class="pagination-bar">
+                        <div class="pagination-info" id="history-pagination-info">Showing 0-0 of 0 domains</div>
+                        <div class="pagination-controls">
+                            <button class="btn btn-secondary" id="history-btn-prev" disabled>
+                                <i class="fa-solid fa-chevron-left"></i> Previous
+                            </button>
+                            <span style="font-family: var(--font-mono); font-size: 0.82rem; padding: 0 0.5rem;" id="history-page-indicator">Page 1</span>
+                            <button class="btn btn-secondary" id="history-btn-next" disabled>
+                                Next <i class="fa-solid fa-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ========================================== -->
+                <!-- VIEW 4: ANALYTICS (/analytics)             -->
+                <!-- ========================================== -->
+                <section class="page-view" id="view-analytics">
+                    <div class="section-header">
+                        <div>
+                            <div class="section-title"><i class="fa-solid fa-chart-line" style="color: var(--secondary);"></i> Domain Intelligence Telemetry</div>
+                            <div class="section-desc">Funnel conversion, candidate yield, and quality score distributions</div>
+                        </div>
+                    </div>
+
+                    <!-- Analytics KPIs -->
+                    <div class="metrics-grid">
+                        <div class="metric-card accent-purple">
+                            <div class="metric-icon-box"><i class="fa-solid fa-filter-circle-dollar"></i></div>
+                            <div class="metric-data">
+                                <span class="metric-label">Yield Conversion Rate</span>
+                                <span class="metric-value" id="analytics-conversion">-</span>
+                            </div>
+                        </div>
+                        <div class="metric-card accent-cyan">
+                            <div class="metric-icon-box"><i class="fa-solid fa-shield-halved"></i></div>
+                            <div class="metric-data">
+                                <span class="metric-label">Avg Quality Score</span>
+                                <span class="metric-value" id="analytics-avg-score">-</span>
+                            </div>
+                        </div>
+                        <div class="metric-card accent-green">
+                            <div class="metric-icon-box"><i class="fa-solid fa-clock-rotate-left"></i></div>
+                            <div class="metric-data">
+                                <span class="metric-label">RDAP Verification Rate</span>
+                                <span class="metric-value">100%</span>
+                            </div>
+                        </div>
+                        <div class="metric-card accent-amber">
+                            <div class="metric-icon-box"><i class="fa-solid fa-database"></i></div>
+                            <div class="metric-data">
+                                <span class="metric-label">Total Verified Persisted</span>
+                                <span class="metric-value" id="analytics-total-domains">-</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Funnel & Category Breakdown Grid -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                        <!-- Availability Funnel Panel -->
+                        <div class="panel">
+                            <div class="section-title" style="margin-bottom: 1rem;">
+                                <i class="fa-solid fa-filter" style="color: var(--primary);"></i>
+                                Domain Candidate Availability Funnel
+                            </div>
+                            <div id="analytics-funnel-container" style="display: flex; flex-direction: column; gap: 1rem;">
+                                <div style="color: var(--text-muted);">Loading funnel telemetry...</div>
+                            </div>
+                        </div>
+
+                        <!-- Score Component Breakdown -->
+                        <div class="panel">
+                            <div class="section-title" style="margin-bottom: 1rem;">
+                                <i class="fa-solid fa-chart-simple" style="color: var(--secondary);"></i>
+                                Score Metric Averages
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                                <div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 0.3rem;">
+                                        <span>Brandability Score</span>
+                                        <b style="font-family: var(--font-mono); color: var(--secondary);" id="analytics-score-brand">91.4</b>
+                                    </div>
+                                    <div class="progress-track"><div class="progress-fill" style="width: 91%; background: var(--secondary);"></div></div>
+                                </div>
+                                <div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 0.3rem;">
+                                        <span>Trend Relevance Score</span>
+                                        <b style="font-family: var(--font-mono); color: var(--primary);" id="analytics-score-trend">92.0</b>
+                                    </div>
+                                    <div class="progress-track"><div class="progress-fill" style="width: 92%; background: var(--primary);"></div></div>
+                                </div>
+                                <div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 0.8rem; margin-bottom: 0.3rem;">
+                                        <span>Commercial Viability Score</span>
+                                        <b style="font-family: var(--font-mono); color: var(--success);" id="analytics-score-comm">93.2</b>
+                                    </div>
+                                    <div class="progress-track"><div class="progress-fill" style="width: 93%; background: var(--success);"></div></div>
+                                </div>
+                        </div>
+                    </div>
+
+                    <!-- Phase 4 Learning Engine & Strategy Telemetry -->
+                    <div style="display: grid; grid-template-columns: 1.2fr 1.8fr; gap: 1.5rem; margin-top: 1.5rem;">
+                        <!-- Self-Learning System Status -->
+                        <div class="panel">
+                            <div class="section-header" style="margin-bottom: 0.85rem;">
+                                <div>
+                                    <div class="section-title" style="font-size: 1.05rem;">
+                                        <i class="fa-solid fa-brain" style="color: var(--primary);"></i>
+                                        Self-Learning Ranker
+                                    </div>
+                                    <div class="section-desc">Statistical user preference model (scikit-learn)</div>
+                                </div>
+                                <span class="status-pill" id="learning-status-pill" style="font-size: 0.72rem; padding: 0.2rem 0.5rem; background: rgba(124, 92, 255, 0.15); color: var(--primary); border: 1px solid var(--primary);">COLD_START</span>
+                            </div>
+
+                            <div style="display: flex; flex-direction: column; gap: 0.75rem; font-size: 0.8rem;">
+                                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.4rem;">
+                                    <span style="color: var(--text-muted);">Learning State:</span>
+                                    <strong id="learning-state-val" style="font-family: var(--font-mono); color: #fff;">COLD_START</strong>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.4rem;">
+                                    <span style="color: var(--text-muted);">Ranker Model Version:</span>
+                                    <strong id="learning-version-val" style="font-family: var(--font-mono); color: var(--secondary);">v0.1.0-coldstart</strong>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.4rem;">
+                                    <span style="color: var(--text-muted);">Feedback Training Samples:</span>
+                                    <strong id="learning-samples-val" style="font-family: var(--font-mono); color: var(--warning);">0</strong>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.4rem;">
+                                    <span style="color: var(--text-muted);">Model Validation Metric:</span>
+                                    <strong id="learning-val-metric" style="font-family: var(--font-mono); color: var(--success);">Baseline (Rule-based)</strong>
+                                </div>
+                                <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.4rem;">
+                                    <span style="color: var(--text-muted);">Last Trained:</span>
+                                    <strong id="learning-trained-val" style="font-family: var(--font-mono); color: var(--text-secondary);">Never</strong>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 1rem;">
+                                <button class="btn btn-secondary" id="btn-retrain-ranker" style="width: 100%; font-size: 0.8rem;">
+                                    <i class="fa-solid fa-arrows-rotate"></i> <span>Retrain Ranker Now</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Strategy Yield & Allocation -->
+                        <div class="panel">
+                            <div class="section-header" style="margin-bottom: 0.85rem;">
+                                <div>
+                                    <div class="section-title" style="font-size: 1.05rem;">
+                                        <i class="fa-solid fa-sliders" style="color: var(--secondary);"></i>
+                                        Strategy Yield & Quota Performance
+                                    </div>
+                                    <div class="section-desc">Dynamic 75% exploit / 25% explore yield optimizer</div>
+                                </div>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="data-table" id="strategy-analytics-table" style="font-size: 0.78rem;">
+                                    <thead>
+                                        <tr>
+                                            <th>Strategy Engine</th>
+                                            <th>Quota / Share</th>
+                                            <th>Generated</th>
+                                            <th>Available</th>
+                                            <th>Yield %</th>
+                                            <th>Accepted %</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="strategy-analytics-tbody">
+                                        <tr>
+                                            <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
+                                                Loading strategy analytics...
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Model Router & Telemetry Performance -->
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <div class="section-header">
+                            <div>
+                                <div class="section-title" style="font-size: 1.05rem;">
+                                    <i class="fa-solid fa-microchip" style="color: var(--warning);"></i>
+                                    Model Task Routing & Reliability Telemetry
+                                </div>
+                                <div class="section-desc">Failure tracking, JSON validity, and latency across providers (failed models excluded from training)</div>
+                            </div>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="data-table" id="model-analytics-table" style="font-size: 0.78rem;">
+                                <thead>
+                                    <tr>
+                                        <th>Pipeline Task</th>
+                                        <th>Provider</th>
+                                        <th>Model</th>
+                                        <th>Success Rate</th>
+                                        <th>Avg Latency</th>
+                                        <th>Valid JSON %</th>
+                                        <th>Health Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="model-analytics-tbody">
+                                    <tr>
+                                        <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
+                                            Loading model router telemetry...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ========================================== -->
+                <!-- VIEW 5: AVAILABILITY SCANNER (/scanner)    -->
+                <!-- ========================================== -->
+                <section class="page-view" id="view-scanner">
+                    <div class="panel" style="margin-bottom: 1.5rem;">
+                        <div class="section-header">
+                            <div>
+                                <div class="section-title">
+                                    <i class="fa-solid fa-shield-halved" style="color: var(--secondary);"></i>
+                                    Dedicated Availability Scanner
+                                </div>
+                                <div class="section-desc">
+                                    Check candidate domains directly against the backend AvailabilityEngine (Cloudflare DoH Nameservers, Authoritative Verisign RDAP, GoDaddy/Atom).
+                                </div>
+                            </div>
+                            <button class="btn btn-secondary" id="btn-scanner-load-samples" style="font-size: 0.78rem;">
+                                <i class="fa-solid fa-flask"></i> Load Sample Domains
+                            </button>
+                        </div>
+
+                        <textarea class="scanner-textarea" id="scanner-input" placeholder="Enter domains to check (one per line)...&#10;example.com&#10;brandname.com&#10;futureai.com"></textarea>
+
+                        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+                            <div style="display: flex; gap: 0.75rem; font-size: 0.8rem;" id="scanner-summary-chips">
+                                <span class="status-pill available">✓ Available: <b id="scan-cnt-avail">0</b></span>
+                                <span class="status-pill registered">✗ Registered: <b id="scan-cnt-reg">0</b></span>
+                                <span class="status-pill premium">★ Premium: <b id="scan-cnt-prem">0</b></span>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button class="btn btn-secondary" id="btn-scanner-clear">Clear</button>
+                                <button class="btn btn-primary" id="btn-scanner-run">
+                                    <i class="fa-solid fa-magnifying-glass"></i>
+                                    <span>SCAN AVAILABILITY</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Scanner Results Table -->
+                    <div class="table-responsive">
+                        <table class="data-table" id="scanner-results-table">
+                            <thead>
+                                <tr>
+                                    <th>Domain</th>
+                                    <th>Status</th>
+                                    <th>Verification Provider</th>
+                                    <th>Standard Registration</th>
+                                    <th>Details / Reason</th>
+                                    <th style="text-align: right;">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="scanner-results-body">
+                                <tr>
+                                    <td colspan="6" style="text-align: center; padding: 2.5rem; color: var(--text-muted);">
+                                        Enter domain names above and click "Scan Availability" to run official checks.
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- ========================================== -->
+                <!-- VIEW 6: EXPORT CENTER (/export)            -->
+                <!-- ========================================== -->
+                <section class="page-view" id="view-export">
+                    <div class="panel" style="max-width: 800px; margin: 0 auto;">
+                        <div class="section-header">
+                            <div>
+                                <div class="section-title">
+                                    <i class="fa-solid fa-file-export" style="color: var(--primary);"></i>
+                                    Export Center
+                                </div>
+                                <div class="section-desc">Download verified opportunities directly from the persistence engine</div>
+                            </div>
+                        </div>
+
+                        <form id="export-form" style="display: flex; flex-direction: column; gap: 1.5rem;">
+                            <!-- Format Selection -->
+                            <div>
+                                <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; font-size: 0.85rem;">Export Format</label>
+                                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem;">
+                                    <label class="panel" style="cursor: pointer; text-align: center; padding: 1rem 0.5rem;">
+                                        <input type="radio" name="export-format" value="csv" checked style="accent-color: var(--primary); margin-bottom: 0.4rem;">
+                                        <div style="font-weight: 700; color: #fff;">CSV</div>
+                                        <div style="font-size: 0.7rem; color: var(--text-muted);">Spreadsheets</div>
+                                    </label>
+                                    <label class="panel" style="cursor: pointer; text-align: center; padding: 1rem 0.5rem;">
+                                        <input type="radio" name="export-format" value="xlsx" style="accent-color: var(--primary); margin-bottom: 0.4rem;">
+                                        <div style="font-weight: 700; color: #fff;">Excel</div>
+                                        <div style="font-size: 0.7rem; color: var(--text-muted);">.xlsx formatted</div>
+                                    </label>
+                                    <label class="panel" style="cursor: pointer; text-align: center; padding: 1rem 0.5rem;">
+                                        <input type="radio" name="export-format" value="json" style="accent-color: var(--primary); margin-bottom: 0.4rem;">
+                                        <div style="font-weight: 700; color: #fff;">JSON</div>
+                                        <div style="font-size: 0.7rem; color: var(--text-muted);">Raw records</div>
+                                    </label>
+                                    <label class="panel" style="cursor: pointer; text-align: center; padding: 1rem 0.5rem;">
+                                        <input type="radio" name="export-format" value="txt" style="accent-color: var(--primary); margin-bottom: 0.4rem;">
+                                        <div style="font-weight: 700; color: #fff;">TXT</div>
+                                        <div style="font-size: 0.7rem; color: var(--text-muted);">Clean domain list</div>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Scope Selection -->
+                            <div>
+                                <label style="display: block; font-weight: 600; margin-bottom: 0.5rem; font-size: 0.85rem;">Export Scope</label>
+                                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                    <label style="display: flex; align-items: center; gap: 0.6rem; cursor: pointer; font-size: 0.85rem;">
+                                        <input type="radio" name="export-scope" value="filter" checked style="accent-color: var(--primary);">
+                                        <span>All filtered / database records</span>
+                                    </label>
+                                    <label style="display: flex; align-items: center; gap: 0.6rem; cursor: pointer; font-size: 0.85rem;">
+                                        <input type="radio" name="export-scope" value="selected" style="accent-color: var(--primary);">
+                                        <span>Selected domains only (<span id="export-selected-count">0</span> currently selected)</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Date Range Filter -->
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                                <div>
+                                    <label style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.3rem;">From Date</label>
+                                    <input type="date" class="input-control" id="export-from-date" style="width: 100%;">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.3rem;">To Date</label>
+                                    <input type="date" class="input-control" id="export-to-date" style="width: 100%;">
+                                </div>
+                            </div>
+
+                            <button type="button" class="btn btn-primary" id="btn-trigger-export" style="padding: 0.8rem; font-size: 0.95rem;">
+                                <i class="fa-solid fa-download"></i>
+                                <span>DOWNLOAD EXPORT FILE</span>
+                            </button>
+                        </form>
+                    </div>
+                </section>
+
+                <!-- ========================================== -->
+                <!-- VIEW 7: AI PROVIDERS (/providers)          -->
+                <!-- ========================================== -->
+                <section class="page-view" id="view-providers">
+                    <div class="section-header">
+                        <div>
+                            <div class="section-title">
+                                <i class="fa-solid fa-network-wired" style="color: var(--secondary);"></i>
+                                AI Providers & Verification Infrastructure
+                            </div>
+                            <div class="section-desc">Live health telemetry, model router task profiles, and authoritative registry endpoints</div>
+                        </div>
+                        <button class="btn btn-secondary" id="btn-refresh-providers" style="font-size: 0.8rem;">
+                            <i class="fa-solid fa-rotate-right"></i> Check Health Now
+                        </button>
+                    </div>
+
+                    <div class="providers-grid" id="providers-container">
+                        <!-- Dynamic provider cards injected here -->
+                    </div>
+                </section>
+
+                <!-- ========================================== -->
+                <!-- VIEW 8: ACTIVITY LOGS (/logs)              -->
+                <!-- ========================================== -->
+                <section class="page-view" id="view-logs">
+                    <div class="panel">
+                        <div class="section-header">
+                            <div>
+                                <div class="section-title">
+                                    <i class="fa-solid fa-terminal" style="color: var(--primary);"></i>
+                                    System Activity & Diagnostic Logs
+                                </div>
+                                <div class="section-desc">Real-time structured telemetry stream captured directly from the Python backend</div>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <input type="text" class="input-control" id="logs-filter-input" placeholder="Filter log text..." style="min-width: 180px; font-size: 0.78rem;">
+                                <button class="btn btn-secondary" id="btn-refresh-logs" style="font-size: 0.8rem;">
+                                    <i class="fa-solid fa-rotate-right"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="terminal-box">
+                            <div class="terminal-body" id="activity-logs-console" style="max-height: 520px; font-size: 0.82rem;">
+                                <div style="color: var(--text-muted); text-align: center; padding: 2rem;">Loading activity log records...</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ========================================== -->
+                <!-- VIEW 9: SETTINGS (/settings)               -->
+                <!-- ========================================== -->
+                <section class="page-view" id="view-settings">
+                    <div class="panel" style="max-width: 860px; margin: 0 auto;">
+                        <div class="section-header">
+                            <div>
+                                <div class="section-title">
+                                    <i class="fa-solid fa-sliders" style="color: var(--primary);"></i>
+                                    System Configuration
+                                </div>
+                                <div class="section-desc">Pipeline thresholds, scheduler settings, and authoritative registry configurations</div>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 1.5rem;" id="settings-container">
+                            <div style="color: var(--text-muted);">Loading settings...</div>
+                        </div>
+                    </div>
+                </section>
+
+            </main>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- DOMAIN DETAIL ANALYSIS MODAL               -->
+    <!-- ========================================== -->
+    <div class="modal-overlay" id="detail-modal" role="dialog" aria-modal="true" aria-labelledby="modal-domain-title">
+        <div class="modal-box">
+            <div class="modal-header">
+                <div class="modal-title" id="modal-domain-title">
+                    <i class="fa-solid fa-globe" style="color: var(--secondary);"></i>
+                    <span id="modal-domain-name" style="font-family: var(--font-mono);">example.com</span>
+                </div>
+                <button class="modal-close-btn" id="modal-close-btn" aria-label="Close dialog">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                    <div class="verification-badge" style="flex: 1; margin: 0;">
+                        <span><i class="fa-solid fa-circle-check"></i> Standard Registration Available</span>
+                        <span style="font-family: var(--font-mono);" id="modal-verified-provider">Verisign RDAP</span>
+                    </div>
+                    <span id="modal-naming-type" style="padding: 0.35rem 0.65rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; background: rgba(0, 212, 255, 0.12); color: var(--secondary); border: 1px solid rgba(0, 212, 255, 0.3); font-family: var(--font-mono);">
+                        ONE_WORD
+                    </span>
+                    <span id="modal-quality-tier" class="tier-badge tier-badge-a">
+                        TIER A
+                    </span>
+                </div>
+
+                <!-- IP & Trademark Risk Screening Section -->
+                <div id="modal-ip-risk-banner" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-md); padding: 0.65rem 0.85rem; display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <i class="fa-solid fa-shield-halved" style="color: var(--success);" id="modal-ip-risk-icon"></i>
+                        <span style="color: var(--text-primary);">IP Screening Risk: <strong id="modal-ip-risk-level" style="color: var(--success);">LOW</strong> (Score: <span id="modal-ip-risk-score">8</span>/100)</span>
+                    </div>
+                    <span style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">USPTO + Brand Registry</span>
+                </div>
+
+                <div class="domain-scores-row">
+                    <div class="score-item">
+                        <span class="label">Overall Score</span>
+                        <span class="val" id="modal-score-overall" style="color: var(--success);">-</span>
+                    </div>
+                    <div class="score-item">
+                        <span class="label">Brandability</span>
+                        <span class="val" id="modal-score-brand">-</span>
+                    </div>
+                    <div class="score-item">
+                        <span class="label">Trend Relevance</span>
+                        <span class="val" id="modal-score-trend">-</span>
+                    </div>
+                    <div class="score-item">
+                        <span class="label">Commercial</span>
+                        <span class="val" id="modal-score-comm">-</span>
+                    </div>
+                </div>
+
+                <!-- Additional Quality Breakdown -->
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; font-size: 0.75rem; text-align: center;">
+                    <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); padding: 0.4rem; border-radius: 4px;">
+                        <span style="color: var(--text-muted); display: block;">Pronunciation</span>
+                        <strong id="modal-score-pron" style="color: #fff; font-family: var(--font-mono);">-</strong>
+                    </div>
+                    <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); padding: 0.4rem; border-radius: 4px;">
+                        <span style="color: var(--text-muted); display: block;">Memorability</span>
+                        <strong id="modal-score-mem" style="color: #fff; font-family: var(--font-mono);">-</strong>
+                    </div>
+                    <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); padding: 0.4rem; border-radius: 4px;">
+                        <span style="color: var(--text-muted); display: block;">Simplicity</span>
+                        <strong id="modal-score-simp" style="color: #fff; font-family: var(--font-mono);">-</strong>
+                    </div>
+                </div>
+
+                <!-- Opportunity & Ranker Prediction Scores -->
+                <div style="display: flex; gap: 0.75rem; font-size: 0.78rem; justify-content: space-between; background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); padding: 0.5rem 0.75rem; border-radius: 4px;">
+                    <div>Opportunity Score: <strong id="modal-opportunity-score" style="color: var(--warning); font-family: var(--font-mono);">-</strong></div>
+                    <div>Model Preference: <strong id="modal-model-pref" style="color: var(--secondary); font-family: var(--font-mono);">Baseline</strong></div>
+                    <div>Strategy: <strong id="modal-strategy" style="color: #c084fc; font-family: var(--font-mono);">-</strong></div>
+                </div>
+
+                <!-- Buyer Intelligence & Commercial Fit Section -->
+                <div style="background: rgba(124, 92, 255, 0.07); border: 1px solid rgba(124, 92, 255, 0.25); border-radius: var(--radius-md); padding: 0.85rem; display: flex; flex-direction: column; gap: 0.5rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 0.75rem; font-weight: 700; color: #fff; text-transform: uppercase;">
+                            <i class="fa-solid fa-briefcase" style="color: var(--primary); margin-right: 0.35rem;"></i> Buyer Intelligence & Positioning
+                        </span>
+                        <span id="modal-buyer-archetype" style="font-size: 0.72rem; font-family: var(--font-mono); color: var(--secondary); font-weight: 600;">Startup Founder</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.75rem;">
+                        <div><span style="color: var(--text-muted);">Target Sectors:</span> <strong id="modal-buyer-sectors" style="color: #fff;">SaaS, AI</strong></div>
+                        <div><span style="color: var(--text-muted);">Startup Fit:</span> <strong id="modal-buyer-fit" style="color: #fff;">High</strong></div>
+                        <div><span style="color: var(--text-muted);">Buyer Pool:</span> <strong id="modal-buyer-count" style="color: #fff;">150 - 500</strong></div>
+                        <div><span style="color: var(--text-muted);">Geography:</span> <strong id="modal-buyer-geo" style="color: #fff;">Global US/EU</strong></div>
+                    </div>
+                    <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.2rem;">
+                        <span style="color: var(--text-muted);">Product Categories:</span> <span id="modal-buyer-products">-</span>
+                    </div>
+                </div>
+
+                <!-- Transparent Explanations Section -->
+                <div style="display: flex; flex-direction: column; gap: 0.4rem; font-size: 0.78rem;">
+                    <div style="font-weight: 700; color: #fff; text-transform: uppercase; font-size: 0.72rem;">
+                        <i class="fa-solid fa-lightbulb" style="color: var(--warning); margin-right: 0.35rem;"></i> Transparent Candidate Explanations
+                    </div>
+                    <div style="background: rgba(8, 10, 18, 0.5); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 0.6rem; display: flex; flex-direction: column; gap: 0.35rem;">
+                        <div><strong style="color: var(--secondary);">Why Generated:</strong> <span id="modal-why-generated" style="color: var(--text-secondary);">-</span></div>
+                        <div><strong style="color: var(--success);">Why Passed Gates:</strong> <span id="modal-why-passed" style="color: var(--text-secondary);">-</span></div>
+                        <div><strong style="color: var(--primary);">Why Scored:</strong> <span id="modal-why-scored" style="color: var(--text-secondary);">-</span></div>
+                        <div><strong style="color: var(--warning);">Why Selected:</strong> <span id="modal-why-selected" style="color: var(--text-secondary);">-</span></div>
+                        <div><strong style="color: #c084fc;">Buyer Potential:</strong> <span id="modal-buyer-potential" style="color: var(--text-secondary);">-</span></div>
+                    </div>
+                </div>
+
+                <div>
+                    <span style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase;">Category & Concept Rationale</span>
+                    <div style="background: rgba(8,10,18,0.5); border: 1px solid var(--border-subtle); padding: 0.65rem 0.85rem; border-radius: var(--radius-md); font-size: 0.82rem; color: var(--text-primary); margin-top: 0.25rem;" id="modal-concept-desc">
+                        -
+                    </div>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-muted);">
+                    <span>Verified: <b id="modal-checked-at" style="color: #fff; font-family: var(--font-mono);">-</b></span>
+                    <span>TLD: <b style="color: var(--secondary); font-family: var(--font-mono);">.com (Official Registry)</b></span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="modal-btn-dismiss">Close</button>
+                <a href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary" id="modal-btn-register">
+                    <i class="fa-solid fa-cart-shopping"></i> <span>Register Domain Now</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- REJECTION FEEDBACK MODAL                   -->
+    <!-- ========================================== -->
+    <div class="modal-overlay" id="rejection-modal" role="dialog" aria-modal="true" aria-labelledby="modal-reject-title">
+        <div class="modal-box" style="max-width: 480px;">
+            <div class="modal-header">
+                <div class="modal-title" id="modal-reject-title">
+                    <i class="fa-solid fa-ban" style="color: var(--danger);"></i>
+                    <span>Reject Domain Candidate</span>
+                </div>
+                <button class="modal-close-btn" id="rejection-close-btn" aria-label="Close dialog">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 0.85rem; color: var(--text-secondary);">
+                    Rejecting <strong id="reject-domain-name" style="color: #fff; font-family: var(--font-mono);">example.com</strong>.
+                    Choose a reason to help train the statistical preference ranker:
+                </p>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;" id="reject-reasons-group">
+                    <label class="reject-reason-pill">
+                        <input type="radio" name="reject_reason" value="Too long">
+                        <span>Too long</span>
+                    </label>
+                    <label class="reject-reason-pill">
+                        <input type="radio" name="reject_reason" value="Hard to pronounce">
+                        <span>Hard to pronounce</span>
+                    </label>
+                    <label class="reject-reason-pill">
+                        <input type="radio" name="reject_reason" value="Sounds bad">
+                        <span>Sounds bad</span>
+                    </label>
+                    <label class="reject-reason-pill">
+                        <input type="radio" name="reject_reason" value="Too generic">
+                        <span>Too generic</span>
+                    </label>
+                    <label class="reject-reason-pill">
+                        <input type="radio" name="reject_reason" value="Not commercial">
+                        <span>Not commercial</span>
+                    </label>
+                    <label class="reject-reason-pill">
+                        <input type="radio" name="reject_reason" value="Weak brand">
+                        <span>Weak brand</span>
+                    </label>
+                    <label class="reject-reason-pill">
+                        <input type="radio" name="reject_reason" value="Too similar to another name">
+                        <span>Too similar</span>
+                    </label>
+                    <label class="reject-reason-pill">
+                        <input type="radio" name="reject_reason" value="Trademark concern">
+                        <span>Trademark concern</span>
+                    </label>
+                    <label class="reject-reason-pill">
+                        <input type="radio" name="reject_reason" value="Don't like it" checked>
+                        <span>Don't like it</span>
+                    </label>
+                    <label class="reject-reason-pill">
+                        <input type="radio" name="reject_reason" value="Other">
+                        <span>Other</span>
+                    </label>
+                </div>
+
+                <div>
+                    <label style="font-size: 0.75rem; color: var(--text-muted); display: block; margin-bottom: 0.35rem;">Additional Feedback / Notes (Optional)</label>
+                    <textarea id="reject-notes-input" class="input-control" rows="2" style="width: 100%; resize: none; font-size: 0.82rem;" placeholder="e.g. awkward consonant cluster..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="reject-btn-cancel">Cancel</button>
+                <button class="btn btn-primary" id="reject-btn-confirm" style="background: var(--danger); border-color: var(--danger);">
+                    <i class="fa-solid fa-ban"></i> <span>Submit Rejection</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATIONS -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Core Application Logic & Router -->
+    <script src="/static/app.js"></script>
+</body>
+</html>

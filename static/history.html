@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Domain Hunter - أرشيف النطاقات</title>
+    <script>window.location.replace('/history');</script>
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .history-container { max-width: 1200px; margin: 0 auto; padding: 2rem; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+        .stat-card { background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); text-align: center; }
+        .stat-card h3 { margin: 0; font-size: 2rem; color: #3b82f6; }
+        .stat-card p { margin: 0.5rem 0 0 0; color: #94a3b8; font-size: 0.9rem; }
+        
+        .controls-panel { background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 1.5rem; display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; }
+        .filter-group { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+        .filter-group select, .filter-group input { padding: 0.5rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: white; }
+        
+        .table-responsive { overflow-x: auto; }
+        .data-table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; text-align: right; }
+        .data-table th, .data-table td { padding: 1rem; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        .data-table th { background: rgba(255,255,255,0.05); font-weight: 500; color: #e2e8f0; }
+        .data-table tr:hover { background: rgba(255,255,255,0.02); }
+        .data-table input[type="checkbox"] { cursor: pointer; }
+        
+        .pagination { display: flex; justify-content: center; align-items: center; gap: 1rem; margin-top: 1.5rem; }
+        .pagination button { padding: 0.5rem 1rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05); color: white; cursor: pointer; }
+        .pagination button:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        /* Modal */
+        .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center; z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        .modal-overlay.active { opacity: 1; pointer-events: auto; }
+        .modal-content { background: #1e293b; padding: 2rem; border-radius: 12px; width: 90%; max-width: 500px; border: 1px solid rgba(255,255,255,0.1); position: relative; }
+        .modal-close { position: absolute; top: 1rem; left: 1rem; cursor: pointer; color: #94a3b8; font-size: 1.2rem; }
+        .modal-title { margin-top: 0; margin-bottom: 1.5rem; color: #f8fafc; font-size: 1.5rem; }
+        
+        .export-dropdown { position: relative; display: inline-block; }
+        .export-btn { background: #10b981; color: white; padding: 0.5rem 1rem; border-radius: 6px; border: none; cursor: pointer; font-family: inherit; }
+        .export-menu { display: none; position: absolute; right: 0; background: #1e293b; min-width: 160px; box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.5); z-index: 1; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); margin-top: 0.5rem; }
+        .export-menu.show { display: block; }
+        .export-menu a { color: white; padding: 12px 16px; text-decoration: none; display: block; }
+        .export-menu a:hover { background-color: rgba(255,255,255,0.05); }
+        .export-menu h4 { padding: 8px 16px; margin: 0; font-size: 0.8rem; color: #94a3b8; border-bottom: 1px solid rgba(255,255,255,0.1); }
+        
+        #loading-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 2000; color: white; flex-direction: column; display: none; }
+    </style>
+</head>
+<body>
+    <header class="top-nav">
+        <div class="logo">
+            <i class="fa-solid fa-satellite-dish"></i> Domain Hunter
+        </div>
+        <nav>
+            <a href="/" style="color: white; text-decoration: none; margin-left: 1rem;"><i class="fa-solid fa-home"></i> الرئيسية</a>
+            <a href="/domains/history" style="color: #3b82f6; text-decoration: none;"><i class="fa-solid fa-box-archive"></i> أرشيف النطاقات</a>
+        </nav>
+    </header>
+
+    <div class="history-container">
+        
+        <div class="stats-grid" id="stats-grid">
+            <div class="stat-card"><h3>-</h3><p>آخر 24 ساعة</p></div>
+            <div class="stat-card"><h3>-</h3><p>آخر 7 أيام</p></div>
+            <div class="stat-card"><h3>-</h3><p>آخر 30 يوم</p></div>
+            <div class="stat-card"><h3>-</h3><p>إجمالي النطاقات</p></div>
+        </div>
+
+        <div class="controls-panel">
+            <div class="filter-group">
+                <input type="text" id="search-input" placeholder="بحث عن نطاق...">
+                
+                <select id="date-filter">
+                    <option value="">كل الوقت</option>
+                    <option value="24h">آخر 24 ساعة</option>
+                    <option value="3d">آخر 3 أيام</option>
+                    <option value="7d">آخر 7 أيام</option>
+                    <option value="30d">آخر 30 يوم</option>
+                    <option value="90d">آخر 90 يوم</option>
+                </select>
+                
+                <select id="category-filter">
+                    <option value="">كل الأقسام</option>
+                    <option value="TECHNOLOGY">تكنولوجيا</option>
+                    <option value="BUSINESS">أعمال</option>
+                    <option value="STARTUP">شركات ناشئة</option>
+                </select>
+
+                <select id="sort-filter">
+                    <option value="newest">الأحدث أولاً</option>
+                    <option value="oldest">الأقدم أولاً</option>
+                </select>
+
+                <select id="limit-filter">
+                    <option value="50">50 بالصفحة</option>
+                    <option value="100">100 بالصفحة</option>
+                    <option value="250">250 بالصفحة</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <span id="selection-count">0 محدد</span>
+                <button id="clear-selection" class="btn" style="display:none; background:rgba(255,0,0,0.2);">إلغاء التحديد</button>
+                <div class="export-dropdown">
+                    <button class="export-btn" id="export-dropdown-btn"><i class="fa-solid fa-download"></i> تصدير <i class="fa-solid fa-caret-down"></i></button>
+                    <div class="export-menu" id="export-menu">
+                        <h4>تصدير المحدد</h4>
+                        <a href="#" onclick="exportData('selected', 'csv')">CSV</a>
+                        <a href="#" onclick="exportData('selected', 'xlsx')">Excel (XLSX)</a>
+                        <a href="#" onclick="exportData('selected', 'json')">JSON</a>
+                        <a href="#" onclick="exportData('selected', 'txt')">TXT (قائمة)</a>
+                        <h4>تصدير نتائج الفلتر</h4>
+                        <a href="#" onclick="exportData('filter', 'csv')">CSV</a>
+                        <a href="#" onclick="exportData('filter', 'xlsx')">Excel (XLSX)</a>
+                        <a href="#" onclick="exportData('filter', 'json')">JSON</a>
+                        <a href="#" onclick="exportData('filter', 'txt')">TXT (قائمة)</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width: 40px;"><input type="checkbox" id="select-all-page"></th>
+                        <th>النطاق</th>
+                        <th>القسم</th>
+                        <th>تاريخ الاكتشاف</th>
+                    </tr>
+                </thead>
+                <tbody id="table-body">
+                    <tr><td colspan="4" style="text-align:center;">جاري التحميل...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div style="text-align: center; color: #94a3b8; font-size: 0.9rem;" id="pagination-info"></div>
+        <div class="pagination">
+            <button id="btn-prev" disabled><i class="fa-solid fa-chevron-right"></i> السابق</button>
+            <span id="page-indicator">صفحة 1</span>
+            <button id="btn-next" disabled>التالي <i class="fa-solid fa-chevron-left"></i></button>
+        </div>
+
+    </div>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="detail-modal">
+        <div class="modal-content">
+            <i class="fa-solid fa-times modal-close" id="modal-close"></i>
+            <h2 class="modal-title" id="modal-domain">example.com</h2>
+            <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #3b82f6;" id="modal-category">Category</span>
+                <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981;" id="modal-score">النقاط: 90</span>
+            </div>
+            <div style="margin: 0.75rem 0; padding: 0.5rem; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; color: #10b981; font-size: 0.85rem; font-weight: 600;">
+                <i class="fa-solid fa-circle-check"></i> ✓ متاح للتسجيل العادي (Standard Registration Available)
+            </div>
+            <p style="color: #94a3b8; font-size: 0.85rem; margin-bottom: 0.3rem;"><i class="fa-solid fa-shield-halved"></i> مزود الفحص: <b id="modal-provider" style="color: #e2e8f0;">Verisign RDAP</b></p>
+            <p style="color: #94a3b8; font-size: 0.85rem;"><i class="fa-regular fa-clock"></i> تم الفحص: <span id="modal-date"></span></p>
+            
+            <div style="margin-top: 1.5rem;">
+                <a href="#" id="modal-godaddy-link" target="_blank" class="btn btn-primary" style="display: block; text-align: center; text-decoration: none;"><i class="fa-solid fa-cart-shopping"></i> تسجيل النطاق الآن</a>
+            </div>
+        </div>
+    </div>
+
+    <div id="loading-overlay">
+        <i class="fa-solid fa-circle-notch fa-spin fa-3x" style="margin-bottom: 1rem;"></i>
+        <h3 id="loading-text">جاري المعالجة...</h3>
+    </div>
+
+    <div id="toast" class="hidden"></div>
+
+    <script src="/static/history.js"></script>
+</body>
+</html>

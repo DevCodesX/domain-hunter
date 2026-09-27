@@ -1,0 +1,61 @@
+# =========================================================================
+# Domain Hunter - INVENTED Candidate Quality Weights & Thresholds
+# PHASE 1 (REVISED): Multi-Signal Anchoring & Brandability Composite
+# =========================================================================
+# NOTE: Initial proposed weighting (starting point, tunable via feedback loop / manual review)
+
+invented_quality:
+  lexical_proximity: 0.25
+  phonetic_proximity: 0.15
+  semantic_anchor: 0.20
+  brandability_heuristic: 0.25
+  pronunciation: 0.10
+  distinctiveness: 0.05
+
+anchor_thresholds:
+  lexical_anchored_min: 72.0
+  phonetic_anchored_min: 78.0
+  semantic_anchored_min: 68.0
+  hybrid_anchored_requires_n_strong: 2
+
+brandability_subweights:
+  length: 0.20
+  vowel_ending_bonus_max: 3          # explicitly capped small, per this phase's design decision
+  pronunciation_simplicity: 0.18
+  orthographic_simplicity: 0.10
+  hear_to_spell: 0.12
+  syllable_naturalness: 0.10
+  unnatural_cluster_penalty: 0.12
+  memorability_pattern: 0.08
+  distinctiveness: 0.05
+  morphological_elegance: 0.05
+
+penalty_tiers:
+  strong_multiplier: 1.0
+  strong_penalty: 0.0
+  moderate_penalty: 6.0
+  weak_penalty: 16.0
+  extremely_weak_penalty: 26.0
+  extremely_weak_brandability_threshold: 40.0
+  weak_unanchored_invented_ratio_cap: 0.15
+
+availability_pipeline:
+  preferred_available: 45
+  max_registry_checks: 600
+  batch_initial: 300
+  batch_step: 150
+  stratified_quotas:
+    real_word: 0.20
+    compound: 0.20
+    semantic: 0.20
+    invented_anchored: 0.15
+    prefix_suffix: 0.10
+    keyword: 0.10
+    multilingual_other: 0.05
+
+tier_a_floors:
+  min_score: 82.0
+  min_pronunciation: 65.0
+  min_hear_to_spell: 60.0
+  min_commercial_naturalness: 65.0
+  min_brandability: 70.0
