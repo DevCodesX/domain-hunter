@@ -659,7 +659,8 @@ Return STRICT JSON:
                     merged.update(result)
             return role, merged
 
-        role_results = await asyncio.gather(*(run_role(role) for role in ROLE_NAMES), return_exceptions=True)
+        enabled_roles = [role for role in ROLE_NAMES if not isinstance(self.config.get(role), dict) or bool(self.config.get(role, {}).get("enabled", True))]
+        role_results = await asyncio.gather(*(run_role(role) for role in enabled_roles), return_exceptions=True)
         by_role: Dict[str, Dict[str, Dict[str, Any]]] = {}
         for result in role_results:
             if not isinstance(result, Exception):
