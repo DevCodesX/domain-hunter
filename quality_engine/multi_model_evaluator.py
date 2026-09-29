@@ -168,10 +168,13 @@ class MultiModelDomainEvaluator:
         label = extract_label(domain)
         naming_type = str(candidate.get("morphology_type") or candidate.get("naming_type") or "INVENTED")
         invented = candidate.get("invented_analysis")
-        if not isinstance(invented, dict) and naming_type.upper() == "INVENTED":
-            try:
-                invented = InventedQualityEvaluator.get_instance().evaluate_candidate(label)
-            except Exception:
+        if not isinstance(invented, dict):
+            if naming_type.upper() == "INVENTED":
+                try:
+                    invented = InventedQualityEvaluator.get_instance().evaluate_candidate(label)
+                except Exception:
+                    invented = {}
+            else:
                 invented = {}
         phon = compute_phonotactic_naturalness(label)
         deterministic = candidate.get("deterministic") if isinstance(candidate.get("deterministic"), dict) else {}
