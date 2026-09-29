@@ -695,7 +695,21 @@ class DomainHunterPipeline:
 
             # Stage 1 is the existing deterministic/pre-availability ranking. The multi-model layer
             # is only invoked for the serious available/IP-cleared pool; it never chooses raw candidates.
-            top_eval_pool = ip_screened_pool[:int(self.multi_model_evaluator.config.get("stage1_pool_size", MAX_AI_EVAL_CANDIDATES))]
+            stage1_size = int(self.multi_model_evaluator.config.get("stage1_pool_size", MAX_AI_EVAL_CANDIDATES))
+            exploration_ratio = float(self.multi_model_evaluator.config.get("exploration_ratio", 0.10))
+            exploration_count = max(0, min(stage1_size - 1, int(round(stage1_size * exploration_ratio))))
+            exploit_count = max(0, stage1_size - exploration_count)
+            exploit_pool = ip_screened_pool[:exploit_count]
+            selected_domains = {c["domain"] for c in exploit_pool}
+            exploration_pool = []
+            for candidate in ip_screened_pool[exploit_count:]:
+                if len(exploration_pool) >= exploration_count:
+                    break
+                ntype = str(candidate.get("naming_type_info", {}).get("naming_type", candidate.get("naming_type", ""))).upper()
+                if ntype == "INVENTED" and candidate["domain"] not in selected_domains:
+                    exploration_pool.append(candidate)
+                    selected_domains.add(candidate["domain"])
+            top_eval_pool = exploit_pool + exploration_pool
             mm_context = []
             for c in top_eval_pool:
                 mm_context.append({
