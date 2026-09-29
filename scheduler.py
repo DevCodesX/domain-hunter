@@ -1490,8 +1490,27 @@ class DomainHunterPipeline:
                 f"CHECKED: {funnel_stats['checked']}, "
                 f"AVAILABLE_STANDARD: {funnel_stats['available_standard']}, "
                 f"IP_PASSED: {funnel_stats['ip_passed']}, "
-                f"AI_EVALUATED: {funnel_stats['ai_evaluated']}, "
+                f"MULTI_MODEL_EVALUATED: {funnel_stats['multi_model_evaluated']}, "
+                f"CONSENSUS_PASS: {funnel_stats['consensus_pass']}, "
+                f"QUALITY_FLOOR_PASS: {funnel_stats['quality_floor_pass']}, "
+                f"LEARNED_RANKED: {funnel_stats['learned_ranked']}, "
+                f"DIVERSITY_INPUT: {funnel_stats['diversity_input']}, "
+                f"DIVERSITY_SELECTED: {funnel_stats['diversity_selected']}, "
                 f"FINAL: {len(final_selection)}"
+            )
+            mm_summary = funnel_stats.get("multi_model_summary", {})
+            logger.info(
+                "[MULTI-MODEL EVALUATION]\\n"
+                "----------------------\\n"
+                f"Candidates evaluated: {funnel_stats['multi_model_evaluated']}\\n"
+                f"Linguistic judge: {mm_summary.get('roles', {}).get('linguistic', {})}\\n"
+                f"Brand judge: {mm_summary.get('roles', {}).get('brand', {})}\\n"
+                f"Commercial judge: {mm_summary.get('roles', {}).get('commercial', {})}\\n"
+                f"Red-team: {mm_summary.get('roles', {}).get('red_team', {})}\\n"
+                f"Arbiter: {mm_summary.get('roles', {}).get('arbiter', {})}\\n"
+                f"Likely gibberish: {sum(1 for c in scored_candidates if c.get('gibberish_quality_band') == 'LIKELY_GIBBERISH')}\\n"
+                f"Short-but-meaningless: {sum(1 for c in scored_candidates if c.get('short_but_meaningless'))}\\n"
+                f"Final candidates: {len(final_selection)}"
             )
 
             if is_test_run:
