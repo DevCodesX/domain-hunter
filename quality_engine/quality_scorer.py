@@ -343,7 +343,15 @@ class QualityScorer:
         ai_flex = ai_evaluation.get("category_flexibility") if (ai_evaluation and ai_evaluation.get("ai_evaluated")) else None
         if ai_flex is not None:
             semantic_blend = 0.20 if invented_eval else 0.35
-            semantic_relevance_score = (semantic_relevance_score * (1.0 - semantic_blend)) + (float(ai_flex) * semantic_blend)
+            if invented_eval:
+                base_semantic = float(invented_eval.get("semantic_anchor_score", 0.0) or 0.0)
+                if invented_eval.get("invented_subtype") == "UNANCHORED":
+                    base_semantic = min(45.0, base_semantic)
+                elif invented_eval.get("invented_quality_tier") == "WEAK":
+                    base_semantic = min(60.0, base_semantic)
+            else:
+                base_semantic = 85.0 if naming_type in ["ONE_WORD", "REAL_WORD", "FOREIGN_WORD", "REAL_FOREIGN_WORD", "COMPOUND", "SEMANTIC_BRANDABLE"] else 78.0
+            semantic_relevance_score = (base_semantic * (1.0 - semantic_blend)) + (float(ai_flex) * semantic_blend)
         else:
             if invented_eval:
                 # Semantic quality for invented names is evidence-backed. No anchor means no
