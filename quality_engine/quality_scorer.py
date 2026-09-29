@@ -42,7 +42,8 @@ class QualityScorer:
         pattern_diversity_score: float = 100.0,
         ai_naming_artifact_score: Optional[float] = None,
         morphology_type: Optional[str] = None,
-        phonetic_cluster_id: Optional[str] = None
+        phonetic_cluster_id: Optional[str] = None,
+        multi_model_evaluation: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Calculates all sub-scores and the aggregated quality_score with high floating-point resolution.
@@ -206,6 +207,19 @@ class QualityScorer:
         buyer_industries = buyer_res["buyer_industries"]
         startup_fit = buyer_res["startup_fit"]
 
+        # INVENTED commercial evidence must be semantic/buyer-evidence based, not length based.
+        # The old BuyerClarityScorer starts from a short-name baseline; cap that proxy for
+        # unanchored/weak invented candidates so length cannot manufacture commercial value.
+        if invented_eval:
+            inv_tier = invented_eval.get("invented_quality_tier")
+            inv_semantic = float(invented_eval.get("semantic_anchor_score", 0.0) or 0.0)
+            if inv_tier == "EXTREMELY_WEAK" or invented_eval.get("invented_subtype") == "UNANCHORED":
+                candidate_commercial_fit = min(candidate_commercial_fit, 52.0 + min(6.0, inv_semantic * 0.08))
+                buyer_clarity_score = min(buyer_clarity_score, 55.0 + min(5.0, inv_semantic * 0.08))
+            elif inv_tier == "WEAK":
+                candidate_commercial_fit = min(candidate_commercial_fit, 62.0 + min(6.0, inv_semantic * 0.06))
+                buyer_clarity_score = min(buyer_clarity_score, 66.0 + min(5.0, inv_semantic * 0.05))
+
         if ai_evaluation and "buyer_clarity_score" in ai_evaluation:
             buyer_clarity_score = (buyer_clarity_score * 0.35) + (float(ai_evaluation["buyer_clarity_score"]) * 0.65)
         if ai_evaluation and ai_evaluation.get("startup_fit"):
@@ -327,9 +341,20 @@ class QualityScorer:
         if ai_flex is not None:
             semantic_relevance_score = float(ai_flex)
         else:
-            base_sem = 85.0 if naming_type in ["ONE_WORD", "REAL_WORD", "FOREIGN_WORD", "REAL_FOREIGN_WORD", "COMPOUND", "SEMANTIC_BRANDABLE"] else 78.0
-            sem_jitter = (distinct_base * 0.1) - (ai_feel_detector.get("ai_generated_feel_score", 15.0) * 0.05)
-            semantic_relevance_score = round(max(10.0, min(100.0, base_sem + sem_jitter)), 3)
+            if invented_eval:
+                # Semantic quality for invented names is evidence-backed. No anchor means no
+                # semantic credit merely for looking like a startup name.
+                inv_semantic = float(invented_eval.get("semantic_anchor_score", 0.0) or 0.0)
+                inv_subtype = invented_eval.get("invented_subtype")
+                semantic_relevance_score = inv_semantic
+                if inv_subtype == "UNANCHORED":
+                    semantic_relevance_score = min(45.0, semantic_relevance_score)
+                elif invented_eval.get("invented_quality_tier") == "WEAK":
+                    semantic_relevance_score = min(60.0, semantic_relevance_score)
+            else:
+                base_sem = 85.0 if naming_type in ["ONE_WORD", "REAL_WORD", "FOREIGN_WORD", "REAL_FOREIGN_WORD", "COMPOUND", "SEMANTIC_BRANDABLE"] else 78.0
+                sem_jitter = (distinct_base * 0.1) - (ai_feel_detector.get("ai_generated_feel_score", 15.0) * 0.05)
+                semantic_relevance_score = round(max(10.0, min(100.0, base_sem + sem_jitter)), 3)
 
         # Distinctiveness Score (0-100)
         ai_dist = ai_evaluation.get("distinctiveness") if (ai_evaluation and ai_evaluation.get("ai_evaluated")) else None
@@ -340,6 +365,69 @@ class QualityScorer:
         if is_word_glue:
             distinctiveness_score -= 15.0
         distinctiveness_score = round(max(10.0, min(100.0, distinctiveness_score)), 3)
+
+        # =========================================================================
+        # MULTI-MODEL CALIBRATION
+        # Independent judges enrich deterministic scores; they never replace hard evidence.
+        # =========================================================================
+        if isinstance(multi_model_evaluation, dict):
+            consensus = multi_model_evaluation.get("consensus", {}) if isinstance(multi_model_evaluation.get("consensus"), dict) else {}
+            cfg = multi_model_evaluation.get("_config", {}) if isinstance(multi_model_evaluation.get("_config"), dict) else {}
+            def _mm(value, default=None):
+                try:
+                    return float(value) if value is not None else default
+                except (TypeError, ValueError):
+                    return default
+            inv_subtype = invented_eval.get("invented_subtype") if invented_eval else None
+            ai_brand = _mm(consensus.get("final_brand_quality") or consensus.get("brand_quality"))
+            ai_comm = _mm(consensus.get("final_commercial_quality") or consensus.get("commercial_quality"))
+            ai_buyer = _mm(consensus.get("final_buyer_quality") or consensus.get("buyer_quality"))
+            ai_sem = _mm(consensus.get("final_semantic_quality") or consensus.get("semantic_quality"))
+            ai_ling = _mm(consensus.get("final_linguistic_quality") or consensus.get("linguistic_quality"))
+            ai_gib = _mm(consensus.get("final_gibberish_risk") or consensus.get("gibberish_risk"), 0.0)
+            confidence = _mm(multi_model_evaluation.get("consensus_confidence"), 0.0)
+            blend = float(cfg.get("invented_ai_blend", 0.35)) if inv_subtype else float(cfg.get("non_invented_ai_blend", 0.45))
+            if inv_subtype in {"UNANCHORED", "WEAK"}:
+                blend = min(blend, 0.25)
+            if confidence < float(cfg.get("min_consensus_confidence", 55.0)):
+                blend *= max(0.0, confidence / max(1.0, float(cfg.get("min_consensus_confidence", 55.0))))
+            if ai_brand is not None:
+                brandability_score = (brandability_score * (1.0 - blend)) + (ai_brand * blend)
+            if ai_comm is not None:
+                commercial_score = (commercial_score * (1.0 - blend)) + (ai_comm * blend)
+                candidate_commercial_fit = (candidate_commercial_fit * (1.0 - blend)) + (ai_comm * blend)
+            if ai_buyer is not None:
+                buyer_clarity_score = (buyer_clarity_score * (1.0 - blend)) + (ai_buyer * blend)
+            if ai_sem is not None and inv_subtype not in {"UNANCHORED", "WEAK"}:
+                semantic_relevance_score = (semantic_relevance_score * (1.0 - min(blend, 0.25))) + (ai_sem * min(blend, 0.25))
+            if ai_ling is not None:
+                natural_brand_score = (natural_brand_score * (1.0 - min(blend, 0.30))) + (ai_ling * min(blend, 0.30))
+            if ai_gib >= 70.0:
+                brandability_score -= min(15.0, (ai_gib - 70.0) * 0.35)
+                commercial_score -= min(12.0, (ai_gib - 70.0) * 0.25)
+            red_team_score = _mm(consensus.get("red_team_score"))
+            if red_team_score is not None and red_team_score < float(cfg.get("red_team_low_score", 55.0)):
+                penalty = min(15.0, (float(cfg.get("red_team_low_score", 55.0)) - red_team_score) * float(cfg.get("red_team_penalty_factor", 0.20)))
+                brandability_score -= penalty
+                commercial_score -= penalty * 0.75
+            # Deterministic hard facts cap subjective enrichment.
+            if invented_eval and inv_subtype == "UNANCHORED":
+                brandability_score = min(brandability_score, float(cfg.get("unanchored_final_ceiling", 64.0)))
+                commercial_score = min(commercial_score, float(cfg.get("unanchored_commercial_ceiling", 58.0)))
+                semantic_relevance_score = min(semantic_relevance_score, float(cfg.get("short_meaningless_semantic_max", 50.0)))
+            elif invented_eval and invented_eval.get("invented_quality_tier") == "WEAK":
+                brandability_score = min(brandability_score, float(cfg.get("weak_final_ceiling", 72.0)))
+                commercial_score = min(commercial_score, float(cfg.get("weak_commercial_ceiling", 68.0)))
+            if bool(multi_model_evaluation.get("short_but_meaningless")):
+                brandability_score = min(brandability_score, 58.0)
+                commercial_score = min(commercial_score, 55.0)
+                semantic_relevance_score = min(semantic_relevance_score, 45.0)
+            brandability_score = round(max(10.0, min(100.0, brandability_score)), 3)
+            commercial_score = round(max(10.0, min(100.0, commercial_score)), 3)
+            candidate_commercial_fit = round(max(10.0, min(100.0, candidate_commercial_fit)), 3)
+            buyer_clarity_score = round(max(10.0, min(100.0, buyer_clarity_score)), 3)
+            semantic_relevance_score = round(max(10.0, min(100.0, semantic_relevance_score)), 3)
+            natural_brand_score = round(max(10.0, min(100.0, natural_brand_score)), 3)
 
         # =========================================================================
         # 4. AGGREGATED QUALITY SCORE (Requirement 12: Recalculate strictly from candidate-level features)
