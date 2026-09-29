@@ -36,7 +36,8 @@ from quality_engine import (
     BuyerIntelligenceEngine,
     QualityTierEngine,
     MultiEngineOrchestrator,
-    EvolutionaryGenerator
+    EvolutionaryGenerator,
+    MultiModelDomainEvaluator
 )
 
 # Phase 4: Self-Learning & Feedback Learning Modules
@@ -157,7 +158,8 @@ class DomainHunterPipeline:
         self.naming_classifier = NamingTypeClassifier(self.one_word_engine)
         self.strategy_generator = NamingStrategyGenerator(self.router)
         self.quality_scorer = QualityScorer()
-        self.ai_evaluator = AIQualityEvaluator(self.router)
+        self.ai_evaluator = AIQualityEvaluator(self.router)  # legacy compatibility
+        self.multi_model_evaluator = MultiModelDomainEvaluator(self.router)
         self.diversity_engine = DiversityEngine()
 
         # Initialize Phase 2 IP / Trademark Risk components
@@ -233,8 +235,15 @@ class DomainHunterPipeline:
             "ip_passed": 0,
             "ip_critical_rejected": 0,
             "ai_evaluated": 0,
+            "multi_model_evaluated": 0,
+            "multi_model_summary": {},
+            "consensus_pass": 0,
+            "quality_floor_pass": 0,
+            "learned_ranked": 0,
+            "diversity_input": 0,
             "diversity_selected": 0,
             "final": 0,
+            "funnel_rejections": {"availability": 0, "ip": 0, "deterministic_quality": 0, "consensus": 0, "quality_floor": 0, "diversity": 0},
             # Section 6 explicit production metrics:
             "one_word_generated": 0,
             "one_word_available": 0,
@@ -684,15 +693,26 @@ class DomainHunterPipeline:
             # 2. Cluster candidates by pronunciation (Requirement 2)
             phonetic_cluster_map = PhoneticEngine.get_candidate_cluster_map(pool_domains)
 
-            # Select top pool for AI evaluation (up to MAX_AI_EVAL_CANDIDATES to optimize latency & API quotas)
-            top_eval_pool = ip_screened_pool[:MAX_AI_EVAL_CANDIDATES]
-            domains_for_ai = [c["domain"] for c in top_eval_pool]
-
-            ai_evaluations = await self.ai_evaluator.evaluate_candidates_batch(
-                domains_for_ai,
-                concept=concepts[0] if concepts else ""
-            )
-            funnel_stats["ai_evaluated"] = len(ai_evaluations)
+            # Stage 1 is the existing deterministic/pre-availability ranking. The multi-model layer
+            # is only invoked for the serious available/IP-cleared pool; it never chooses raw candidates.
+            top_eval_pool = ip_screened_pool[:int(self.multi_model_evaluator.config.get("stage1_pool_size", MAX_AI_EVAL_CANDIDATES))]
+            mm_context = []
+            for c in top_eval_pool:
+                mm_context.append({
+                    "domain": c["domain"],
+                    "source_concept": c.get("source_concept", ""),
+                    "market_category": c.get("market_category", "AI & Technology"),
+                    "naming_type": c.get("naming_type_info", {}).get("naming_type", "INVENTED"),
+                    "availability_status": c.get("availability_result").status.value if c.get("availability_result") else None,
+                    "availability_verified": bool(c.get("availability_result").availability_verified) if c.get("availability_result") else False,
+                    "ip_risk_level": c.get("ip_report").ip_risk_level.value if c.get("ip_report") else None,
+                    "ip_check_status": getattr(c.get("ip_report"), "ip_check_status", None),
+                })
+            multi_eval_result = await self.multi_model_evaluator.evaluate_batch(mm_context, context={"concept": concepts[0] if concepts else ""}) if mm_context else {"candidates": {}, "summary": {}}
+            multi_evaluations = multi_eval_result.get("candidates", {})
+            funnel_stats["multi_model_evaluated"] = len(multi_evaluations)
+            funnel_stats["ai_evaluated"] = len(multi_evaluations)
+            funnel_stats["multi_model_summary"] = multi_eval_result.get("summary", {})
 
             scored_candidates: List[Dict[str, Any]] = []
             for cand in ip_screened_pool:
@@ -718,7 +738,8 @@ class DomainHunterPipeline:
                     structural_features=cand["structural_features"],
                     one_word_features=cand["one_word_features"],
                     naming_type_info=cand["naming_type_info"],
-                    ai_evaluation=ai_eval,
+                    ai_evaluation=None,
+                    multi_model_evaluation=({**multi_evaluations.get(d, {}), "_config": self.multi_model_evaluator.config} if d in multi_evaluations else None),
                     concept=cand.get("source_concept", ""),
                     market_category=cand.get("market_category", "AI & Technology"),
                     concept_trend_relevance=float(cand.get("opportunity_score", 85.0)),
