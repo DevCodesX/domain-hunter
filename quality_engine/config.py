@@ -114,12 +114,18 @@ DEFAULT_MULTI_MODEL_EVALUATION: Dict[str, Any] = {
         "red_team": "quality_evaluator",
         "arbiter": "final_judge",
     },
+    "linguistic": {"enabled": True, "temperature": 0.1, "max_tokens": 2200},
+    "brand": {"enabled": True, "temperature": 0.2, "max_tokens": 2200},
+    "commercial": {"enabled": True, "temperature": 0.2, "max_tokens": 2200},
+    "red_team": {"enabled": True, "temperature": 0.1, "max_tokens": 2200},
+    "arbiter": {"enabled": True, "temperature": 0.1, "max_tokens": 1800},
+    "arbiter_enabled": True,
     "role_profile_index": {
-        "linguistic": 0,
+        "linguistic": 2,
         "brand": 0,
         "commercial": 0,
         "red_team": 1,
-        "arbiter": 0,
+        "arbiter": 1,
     },
 }
 def get_multi_model_evaluation_config() -> Dict[str, Any]:
