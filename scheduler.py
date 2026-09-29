@@ -1137,7 +1137,11 @@ class DomainHunterPipeline:
                 commercial_quality = float(consensus.get("final_commercial_quality") or consensus.get("commercial_quality") or cand.get("commercial_score", 0.0))
                 buyer_quality = float(consensus.get("final_buyer_quality") or consensus.get("buyer_quality") or cand.get("buyer_clarity_score", 0.0))
                 semantic_quality = float(consensus.get("final_semantic_quality") or consensus.get("semantic_quality") or cand.get("quality_breakdown", {}).get("semantic", 0.0))
-                atom = cand.get("atom") or {}
+                atom = cand.get("atom") or {
+                    "atom_domain_score": cand.get("atom_domain_score"),
+                    "atom_market_signal": cand.get("atom_market_signal"),
+                    "atom_appraisal": cand.get("atom_appraisal"),
+                }
                 atom_signal = atom.get("atom_domain_score", atom.get("atom_market_signal", atom.get("atom_appraisal")))
                 try:
                     atom_signal = float(atom_signal) if atom_signal is not None else 50.0
