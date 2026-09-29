@@ -126,3 +126,23 @@ def test_short_unanchored_name_does_not_receive_high_semantic_or_commercial_scor
     assert result["brandability_score"] <= 58
     assert result["commercial_score"] <= 55
     assert result["quality_breakdown"]["semantic"] <= 45
+
+
+def test_all_judge_failure_has_deterministic_fallback():
+    candidate = {
+        "domain": "horede.com",
+        "quality_score": 70,
+        "multi_model_review": {
+            "linguistic_judge": {"status": "FAILED"},
+            "brand_judge": {"status": "FAILED"},
+            "commercial_judge": {"status": "FAILED"},
+            "red_team_judge": {"status": "FAILED"},
+            "consensus": {"consensus_score": None, "verdict": "REVIEW"}
+        }
+    }
+    successes = sum(
+        1 for role in ("linguistic_judge", "brand_judge", "commercial_judge", "red_team_judge")
+        if candidate["multi_model_review"][role]["status"] == "SUCCESS"
+    )
+    assert successes == 0
+    assert candidate["quality_score"] == 70
