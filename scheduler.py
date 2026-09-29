@@ -1073,16 +1073,35 @@ class DomainHunterPipeline:
             # Diversity is deliberately AFTER these gates.
             # =============================================================
             mm_cfg = self.multi_model_evaluator.config
+            mm_summary = funnel_stats.get("multi_model_summary", {})
+            all_judges_failed = bool(mm_summary.get("roles")) and all(
+                int(role_stats.get("success", 0)) == 0 for role_stats in mm_summary.get("roles", {}).values() if role_stats is not None
+            )
             consensus_candidates: List[Dict[str, Any]] = []
             for c in safe_scored_candidates:
                 review = c.get("multi_model_review") or {}
                 consensus = c.get("consensus") or {}
                 evaluated = bool(review)
+                judge_successes = sum(
+                    1 for role in ("linguistic_judge", "brand_judge", "commercial_judge", "red_team_judge")
+                    if (c.get(role) or {}).get("status") == "SUCCESS"
+                )
+                deterministic_fallback = all_judges_failed or (evaluated and judge_successes == 0)
                 verdict = str(consensus.get("verdict", "REVIEW")).upper()
                 confidence = float(c.get("consensus_confidence") or consensus.get("confidence") or 0.0)
-                consensus_score = float(consensus.get("consensus_score") or 0.0)
-                if bool(mm_cfg.get("enabled", True)) and not evaluated:
+                consensus_score = float(consensus.get("consensus_score") or c.get("quality_score", 0.0) or 0.0)
+                if bool(mm_cfg.get("enabled", True)) and not evaluated and not all_judges_failed:
                     c["selection_rejection_stage"] = "MULTI_MODEL_EVALUATED"
+                    continue
+                if deterministic_fallback:
+                    c["multi_model_fallback"] = "DETERMINISTIC_ONLY"
+                    consensus_score = float(c.get("quality_score", 0.0) or 0.0)
+                    confidence = min(55.0, float(c.get("quality_score", 0.0) or 0.0))
+                elif evaluated and (verdict == "REJECT" or consensus_score < float(mm_cfg.get("arbiter_review_min_score", 60.0))):
+                    c["selection_rejection_stage"] = "CONSENSUS_PASS"
+                    continue
+                if evaluated and not deterministic_fallback and confidence < float(mm_cfg.get("min_consensus_confidence", 55.0)):
+                    c["selection_rejection_stage"] = "CONSENSUS_PASS"
                     continue
                 if evaluated and (verdict == "REJECT" or consensus_score < float(mm_cfg.get("arbiter_review_min_score", 60.0))):
                     c["selection_rejection_stage"] = "CONSENSUS_PASS"
