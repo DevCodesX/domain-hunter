@@ -59,3 +59,46 @@ tier_a_floors:
   min_hear_to_spell: 60.0
   min_commercial_naturalness: 65.0
   min_brandability: 70.0
+
+
+# =========================================================================
+# PHASE QE: Invented generation control, brandability calibration, gates
+# =========================================================================
+invented_generation:
+  baseline_ratio: 0.14
+  max_ratio: 0.18
+  exploration_ratio: 0.10
+  anchored_ratio_target: 0.90
+  exploration_ratio_max: 0.10
+  min_strategy_quota: 40
+
+invented_brandability:
+  anchor_factor_strong: 1.00
+  anchor_factor_moderate: 0.88
+  anchor_factor_weak: 0.72
+  anchor_factor_unanchored: 0.58
+
+invented_final_gates:
+  tier_a_requires: STRONG
+  tier_b_requires: MODERATE
+  weak_action: WATCHLIST
+  unanchored_action: WATCHLIST
+  extremely_weak_action: REJECT
+
+commercial_calibration:
+  invented_neutral_baseline: 52.0
+  length_bonus_cap: 8.0
+
+trend_calibration:
+  invented_unanchored_cap: 45.0
+  invented_weak_cap: 55.0
+
+strategy_quotas:
+  ONE_WORD: 300
+  INVENTED: 280
+  SEMANTIC: 350
+  COMPOUND: 300
+  PREFIX_SUFFIX: 200
+  TREND: 200
+  KEYWORD_BRANDABLE: 200
+  target_total: 1830
