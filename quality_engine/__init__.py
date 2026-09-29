@@ -42,6 +42,7 @@ from quality_engine.multi_engine import (
     INITIAL_STRATEGY_QUOTAS
 )
 from quality_engine.evolutionary_generator import EvolutionaryGenerator
+from quality_engine.multi_model_evaluator import MultiModelDomainEvaluator, robust_statistics
 from quality_engine.invented_quality import (
     InventedQualityEvaluator,
     invented_quality_score,
@@ -86,6 +87,8 @@ __all__ = [
     "MultiEngineOrchestrator",
     "INITIAL_STRATEGY_QUOTAS",
     "EvolutionaryGenerator",
+    "MultiModelDomainEvaluator",
+    "robust_statistics",
     "InventedQualityEvaluator",
     "invented_quality_score",
     "invented_subtype",
