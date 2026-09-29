@@ -732,7 +732,7 @@ class DomainHunterPipeline:
             for cand in ip_screened_pool:
                 d = cand["domain"]
                 label = cand.get("structural_features", {}).get("label", d.replace(".com", "").strip().lower())
-                ai_eval = ai_evaluations.get(d)
+                ai_eval = None
                 res: AvailabilityResult = cand["availability_result"]
                 ip_report = cand["ip_report"]
                 
