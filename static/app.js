@@ -1582,6 +1582,26 @@
             tierEl.innerHTML = tier === 'TIER_A' ? '<i class="fa-solid fa-star"></i> TIER A: HIGH CONVICTION' : (tier === 'TIER_B' ? '<i class="fa-solid fa-bolt"></i> TIER B: STRONG' : '<i class="fa-solid fa-eye"></i> WATCHLIST');
         }
 
+        // Multi-model independent review
+        const mm = d.multi_model_review || {};
+        const mmConsensus = d.consensus || mm.consensus || {};
+        const mmScore = (key, fallback='-') => {
+            const value = mmConsensus[key];
+            return value === undefined || value === null ? fallback : Number(value).toFixed(1);
+        };
+        const mmSet = (id, value) => { const el = document.getElementById(id); if (el) el.innerText = value; };
+        mmSet('modal-mm-linguistic', mmScore('final_linguistic_quality', mmScore('linguistic_quality')));
+        mmSet('modal-mm-brand', mmScore('final_brand_quality', mmScore('brand_quality')));
+        mmSet('modal-mm-commercial', mmScore('final_commercial_quality', mmScore('commercial_quality')));
+        mmSet('modal-mm-red', mmScore('red_team_score'));
+        mmSet('modal-mm-consensus', mmScore('consensus_score'));
+        mmSet('modal-mm-confidence', 'Confidence: ' + mmScore('confidence', d.consensus_confidence !== undefined ? Number(d.consensus_confidence).toFixed(1) : '-'));
+        mmSet('modal-mm-strengths', Array.isArray(mmConsensus.major_strengths) && mmConsensus.major_strengths.length ? mmConsensus.major_strengths.join(' • ') : '-');
+        mmSet('modal-mm-weaknesses', Array.isArray(mmConsensus.major_weaknesses) && mmConsensus.major_weaknesses.length ? mmConsensus.major_weaknesses.join(' • ') : '-');
+        const redParsed = (d.red_team_judge && d.red_team_judge.parsed) || {};
+        const objections = redParsed.kill_reasons || redParsed.critical_objections || [];
+        mmSet('modal-mm-objections', Array.isArray(objections) && objections.length ? objections.join(' • ') : '-');
+
         // Opportunity & Model Preference Scores
         const oppScoreEl = document.getElementById('modal-opportunity-score');
         if (oppScoreEl) {
