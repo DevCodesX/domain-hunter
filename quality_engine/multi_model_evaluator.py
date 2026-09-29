@@ -685,7 +685,7 @@ Return STRICT JSON:
             reverse=True
         )[:max(0, int(self.config.get("arbiter_pool_size", 20)))]
         prepared_map = {str(c.get("domain", "")).lower(): c for c in prepared}
-        if arbiter_pool and bool(self.config.get("arbiter_enabled", True)):
+        if arbiter_pool and bool(self.config.get("arbiter_enabled", True)) and bool(self.config.get("arbiter", {}).get("enabled", True)):
             arbiter_results = await asyncio.gather(
                 *(self._run_arbiter(prepared_map[item["domain"]], item) for item in arbiter_pool),
                 return_exceptions=True,
