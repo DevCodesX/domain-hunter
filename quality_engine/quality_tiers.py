@@ -7,6 +7,7 @@ Calculates:
 """
 
 import math
+import os
 from typing import Dict, Any, List, Optional, Tuple
 
 
@@ -122,8 +123,12 @@ class QualityTierEngine:
             if inv_tier == "EXTREMELY_WEAK":
                 return "TIER_C" if opportunity_score >= 68.0 else "BELOW_THRESHOLD"
             # Weak invented names require explicit multi-model evidence before A/B.
-            if inv_tier == "WEAK" and not bool(candidate.get("multi_model_review")):
-                return "TIER_C" if opportunity_score >= 68.0 else "BELOW_THRESHOLD"
+            if inv_tier == "WEAK":
+                weak_tier_a_enabled = os.getenv("MULTI_MODEL_WEAK_TIER_A_ENABLED", "false").lower() == "true"
+                if not weak_tier_a_enabled:
+                    return "TIER_B" if opportunity_score >= 74.0 else ("TIER_C" if opportunity_score >= 68.0 else "BELOW_THRESHOLD")
+                if not bool(candidate.get("multi_model_review")):
+                    return "TIER_C" if opportunity_score >= 68.0 else "BELOW_THRESHOLD"
 
         # Tier A Quality Floors & Conviction Guards (Phase 1 Refinement)
         # Prevents high aggregate scores from masking critical subscore weaknesses
