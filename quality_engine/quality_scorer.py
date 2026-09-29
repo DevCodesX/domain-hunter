@@ -221,7 +221,8 @@ class QualityScorer:
                 buyer_clarity_score = min(buyer_clarity_score, 66.0 + min(5.0, inv_semantic * 0.05))
 
         if ai_evaluation and "buyer_clarity_score" in ai_evaluation:
-            buyer_clarity_score = (buyer_clarity_score * 0.35) + (float(ai_evaluation["buyer_clarity_score"]) * 0.65)
+            buyer_blend = 0.30 if invented_eval else 0.45
+            buyer_clarity_score = (buyer_clarity_score * (1.0 - buyer_blend)) + (float(ai_evaluation["buyer_clarity_score"]) * buyer_blend)
         if ai_evaluation and ai_evaluation.get("startup_fit"):
             startup_fit = ai_evaluation["startup_fit"]
         buyer_clarity_score = round(max(10.0, min(100.0, buyer_clarity_score)), 2)
@@ -230,7 +231,8 @@ class QualityScorer:
         category_opp_score = round(max(30.0, min(100.0, float(category_opportunity_score))), 3)
         base_commercial = (candidate_commercial_fit * 0.70) + (category_opp_score * 0.30)
         if ai_evaluation and "commercial_potential" in ai_evaluation:
-            commercial_score = (base_commercial * 0.35) + (float(ai_evaluation["commercial_potential"]) * 0.65)
+            commercial_blend = 0.30 if invented_eval else 0.45
+            commercial_score = (base_commercial * (1.0 - commercial_blend)) + (float(ai_evaluation["commercial_potential"]) * commercial_blend)
         else:
             commercial_score = base_commercial
             if naming_type in ["ONE_WORD", "REAL_WORD", "FOREIGN_WORD", "REAL_FOREIGN_WORD"]:
@@ -321,7 +323,8 @@ class QualityScorer:
         # Brandability Score (0-100)
         ai_brand = ai_evaluation.get("brandability") if (ai_evaluation and ai_evaluation.get("ai_evaluated")) else None
         if ai_brand is not None:
-            brandability_score = float(ai_brand)
+            legacy_brand_blend = 0.30 if invented_eval else 0.45
+            brandability_score = (brandability_base * (1.0 - legacy_brand_blend)) + (float(ai_brand) * legacy_brand_blend)
         elif invented_eval and invented_eval.get("brandability_heuristic_score") is not None:
             # Calibrate INVENTED candidates: anchor brandability to the multi-signal heuristic composite
             # while preserving fine-grained acoustic/sonority distinctness
@@ -339,7 +342,8 @@ class QualityScorer:
         # Semantic Relevance Score (0-100)
         ai_flex = ai_evaluation.get("category_flexibility") if (ai_evaluation and ai_evaluation.get("ai_evaluated")) else None
         if ai_flex is not None:
-            semantic_relevance_score = float(ai_flex)
+            semantic_blend = 0.20 if invented_eval else 0.35
+            semantic_relevance_score = (semantic_relevance_score * (1.0 - semantic_blend)) + (float(ai_flex) * semantic_blend)
         else:
             if invented_eval:
                 # Semantic quality for invented names is evidence-backed. No anchor means no
