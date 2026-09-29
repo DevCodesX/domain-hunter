@@ -1065,6 +1065,9 @@ class DomainHunterPipeline:
 
                 safe_scored_candidates.append(c)
 
+            funnel_stats["funnel_rejections"]["availability"] = max(0, int(funnel_stats.get("checked", 0)) - int(funnel_stats.get("available_standard", 0)))
+            funnel_stats["funnel_rejections"]["ip"] = max(0, int(funnel_stats.get("ip_screened", 0)) - int(funnel_stats.get("ip_passed", 0)))
+
             # =============================================================
             # STAGE 9A: consensus + quality floors + learned ranking
             # Diversity is deliberately AFTER these gates.
@@ -1089,6 +1092,7 @@ class DomainHunterPipeline:
                     continue
                 consensus_candidates.append(c)
             funnel_stats["consensus_pass"] = len(consensus_candidates)
+            funnel_stats["funnel_rejections"]["consensus"] = max(0, len(safe_scored_candidates) - len(consensus_candidates))
 
             quality_floor_candidates: List[Dict[str, Any]] = []
             for c in consensus_candidates:
@@ -1113,6 +1117,7 @@ class DomainHunterPipeline:
                 c["quality_floor_components"] = {"quality": quality, "brand": brand, "commercial": comm, "linguistic": linguistic, "pronunciation": pron}
                 quality_floor_candidates.append(c)
             funnel_stats["quality_floor_pass"] = len(quality_floor_candidates)
+            funnel_stats["funnel_rejections"]["deterministic_quality"] = max(0, len(consensus_candidates) - len(quality_floor_candidates))
 
             # Phase 4 learning must influence rank BEFORE diversity.
             learned_score_map: Dict[str, float] = {}
@@ -1176,6 +1181,7 @@ class DomainHunterPipeline:
                 min_quality_threshold=int(float(mm_cfg.get("final_quality_floor", 68.0)))
             )
             funnel_stats["diversity_selected"] = len(final_selection)
+            funnel_stats["funnel_rejections"]["diversity"] = max(0, len(diversity_input) - len(final_selection))
             funnel_stats["final"] = len(final_selection)
             funnel_stats["one_word_funnel"]["final_one_word"] = sum(
                 1 for c in final_selection
