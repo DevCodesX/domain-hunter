@@ -573,6 +573,13 @@ async def get_domain_quality(domain_or_id: str):
                 "domain": d.get("domain_name", domain_clean),
                 "quality_score": d.get("quality_score", d.get("overall_score")),
                 "quality_breakdown": d.get("quality_breakdown", {}),
+                "multi_model_review": d.get("multi_model_review", {}),
+                "consensus": d.get("consensus", {}),
+                "consensus_confidence": d.get("consensus_confidence"),
+                "gibberish_risk_score": d.get("gibberish_risk_score"),
+                "gibberish_quality_band": d.get("gibberish_quality_band"),
+                "short_but_meaningless": d.get("short_but_meaningless", False),
+                "final_rank_score": d.get("final_rank_score"),
                 "naming_type": d.get("naming_type", "INVENTED")
             }
     sb = get_supabase()

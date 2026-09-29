@@ -93,7 +93,7 @@ class DiversityEngine:
             return []
 
         def get_score(c):
-            return float(c.get("overall_score") or c.get("quality_score") or 0.0)
+            return float(c.get("final_rank_score") if c.get("final_rank_score") is not None else (c.get("overall_score") or c.get("quality_score") or 0.0))
 
         # Sort highest score first
         sorted_cands = sorted(candidates, key=get_score, reverse=True)
@@ -176,6 +176,8 @@ class DiversityEngine:
             # Prefer high-resolution float overall_score
             q_break = get_val(cand, "quality_breakdown") or {}
             float_scores = q_break.get("_float_scores") if isinstance(q_break, dict) else None
+            if get_val(cand, "final_rank_score") is not None:
+                return float(get_val(cand, "final_rank_score"))
             if float_scores and "overall_score" in float_scores:
                 return float(float_scores["overall_score"])
             ov = get_val(cand, "overall_score")

@@ -56,6 +56,83 @@ QUALITY_IMPROVEMENTS = _load_json_config("quality_improvements.json", {})
 PHONOTACTIC_NGRAMS = _load_json_config("phonotactic_ngrams.json", {})
 
 # =========================================================================
+# MULTI-MODEL QUALITY EVALUATION CONFIGURATION
+# =========================================================================
+# Role/model selection is resolved against the existing ModelRouter task profiles.
+# Environment variables can override role provider/model only when the pair is present
+# in the router's configured profiles.
+DEFAULT_MULTI_MODEL_EVALUATION: Dict[str, Any] = {
+    "enabled": os.getenv("MULTI_MODEL_EVALUATION_ENABLED", "true").lower() == "true",
+    "stage1_pool_size": int(os.getenv("MULTI_MODEL_STAGE1_POOL", "50")),
+    "arbiter_pool_size": int(os.getenv("MULTI_MODEL_ARBITER_POOL", "20")),
+    "judge_batch_size": int(os.getenv("MULTI_MODEL_JUDGE_BATCH_SIZE", "5")),
+    "request_timeout_seconds": float(os.getenv("MULTI_MODEL_TIMEOUT_SECONDS", "25")),
+    "judge_max_retries": int(os.getenv("MULTI_MODEL_MAX_RETRIES", "1")),
+    "disagreement_threshold": float(os.getenv("MULTI_MODEL_DISAGREEMENT_THRESHOLD", "22")),
+    "disagreement_penalty_factor": float(os.getenv("MULTI_MODEL_DISAGREEMENT_PENALTY", "0.35")),
+    "missing_judge_penalty": float(os.getenv("MULTI_MODEL_MISSING_JUDGE_PENALTY", "6")),
+    "min_consensus_confidence": float(os.getenv("MULTI_MODEL_MIN_CONFIDENCE", "55")),
+    "arbiter_review_min_score": float(os.getenv("MULTI_MODEL_ARBITER_REVIEW_MIN_SCORE", "60")),
+    "exploration_ratio": float(os.getenv("MULTI_MODEL_EXPLORATION_RATIO", "0.10")),
+    "invented_ai_blend": float(os.getenv("MULTI_MODEL_INVENTED_AI_BLEND", "0.35")),
+    "non_invented_ai_blend": float(os.getenv("MULTI_MODEL_NON_INVENTED_AI_BLEND", "0.45")),
+    "semantic_ai_blend": float(os.getenv("MULTI_MODEL_SEMANTIC_AI_BLEND", "0.25")),
+    "commercial_ai_blend": float(os.getenv("MULTI_MODEL_COMMERCIAL_AI_BLEND", "0.35")),
+    "red_team_penalty_factor": float(os.getenv("MULTI_MODEL_RED_TEAM_PENALTY", "0.20")),
+    "red_team_low_score": float(os.getenv("MULTI_MODEL_RED_TEAM_LOW_SCORE", "55")),
+    "final_quality_floor": float(os.getenv("MULTI_MODEL_FINAL_QUALITY_FLOOR", "68")),
+    "final_brand_floor": float(os.getenv("MULTI_MODEL_FINAL_BRAND_FLOOR", "60")),
+    "final_commercial_floor": float(os.getenv("MULTI_MODEL_FINAL_COMMERCIAL_FLOOR", "58")),
+    "final_linguistic_floor": float(os.getenv("MULTI_MODEL_FINAL_LINGUISTIC_FLOOR", "60")),
+    "unanchored_final_ceiling": float(os.getenv("MULTI_MODEL_UNANCHORED_CEILING", "64")),
+    "weak_final_ceiling": float(os.getenv("MULTI_MODEL_WEAK_CEILING", "72")),
+    "unanchored_commercial_ceiling": float(os.getenv("MULTI_MODEL_UNANCHORED_COMMERCIAL_CEILING", "58")),
+    "weak_commercial_ceiling": float(os.getenv("MULTI_MODEL_WEAK_COMMERCIAL_CEILING", "68")),
+    "deterministic_severe_phonetic_ceiling": float(os.getenv("MULTI_MODEL_SEVERE_PHONETIC_CEILING", "59")),
+    "short_meaningless_max_length": int(os.getenv("MULTI_MODEL_SHORT_MEANINGLESS_MAX_LENGTH", "7")),
+    "short_meaningless_semantic_max": float(os.getenv("MULTI_MODEL_SHORT_MEANINGLESS_SEMANTIC_MAX", "50")),
+    "short_meaningless_commercial_max": float(os.getenv("MULTI_MODEL_SHORT_MEANINGLESS_COMMERCIAL_MAX", "60")),
+    "gibberish_likely_threshold": float(os.getenv("MULTI_MODEL_GIBBERISH_LIKELY_THRESHOLD", "70")),
+    "gibberish_strong_coined_max": float(os.getenv("MULTI_MODEL_GIBBERISH_STRONG_MAX", "20")),
+    "gibberish_acceptable_max": float(os.getenv("MULTI_MODEL_GIBBERISH_ACCEPTABLE_MAX", "40")),
+    "diversity_penalty_cap": float(os.getenv("MULTI_MODEL_DIVERSITY_PENALTY_CAP", "8")),
+    "final_rank_weights": {
+        "deterministic": 0.27,
+        "linguistic": 0.11,
+        "brand": 0.13,
+        "commercial": 0.13,
+        "buyer": 0.09,
+        "semantic": 0.08,
+        "atom": 0.06,
+        "learning": 0.07,
+        "pattern_diversity": 0.06,
+    },
+    "role_task_map": {
+        "linguistic": "quality_evaluator",
+        "brand": "brandability",
+        "commercial": "commercial_evaluator",
+        "red_team": "quality_evaluator",
+        "arbiter": "final_judge",
+    },
+    "linguistic": {"enabled": True, "temperature": 0.1, "max_tokens": 2200},
+    "brand": {"enabled": True, "temperature": 0.2, "max_tokens": 2200},
+    "commercial": {"enabled": True, "temperature": 0.2, "max_tokens": 2200},
+    "red_team": {"enabled": True, "temperature": 0.1, "max_tokens": 2200},
+    "arbiter": {"enabled": True, "temperature": 0.1, "max_tokens": 1800},
+    "arbiter_enabled": True,
+    "role_profile_index": {
+        "linguistic": 2,
+        "brand": 0,
+        "commercial": 0,
+        "red_team": 1,
+        "arbiter": 1,
+    },
+}
+def get_multi_model_evaluation_config() -> Dict[str, Any]:
+    cfg = json.loads(json.dumps(DEFAULT_MULTI_MODEL_EVALUATION))
+    return cfg
+
+# =========================================================================
 # 2. NAMING STRATEGY CANDIDATE TARGETS
 # =========================================================================
 DEFAULT_STRATEGY_TARGETS: Dict[str, int] = {

@@ -7,6 +7,7 @@ Calculates:
 """
 
 import math
+import os
 from typing import Dict, Any, List, Optional, Tuple
 
 
@@ -116,8 +117,18 @@ class QualityTierEngine:
         inv_subtype = candidate.get("invented_subtype")
         brand_score = candidate.get("brandability_heuristic_score")
         if morph == "INVENTED" or inv_tier is not None:
-            if inv_tier == "EXTREMELY_WEAK" or (inv_subtype == "UNANCHORED" and brand_score is not None and brand_score < 40.0):
+            # Unanchored invented names are never Tier A by subjective score alone.
+            if inv_subtype == "UNANCHORED":
                 return "TIER_C" if opportunity_score >= 68.0 else "BELOW_THRESHOLD"
+            if inv_tier == "EXTREMELY_WEAK":
+                return "TIER_C" if opportunity_score >= 68.0 else "BELOW_THRESHOLD"
+            # Weak invented names require explicit multi-model evidence before A/B.
+            if inv_tier == "WEAK":
+                weak_tier_a_enabled = os.getenv("MULTI_MODEL_WEAK_TIER_A_ENABLED", "false").lower() == "true"
+                if not weak_tier_a_enabled:
+                    return "TIER_B" if opportunity_score >= 74.0 else ("TIER_C" if opportunity_score >= 68.0 else "BELOW_THRESHOLD")
+                if not bool(candidate.get("multi_model_review")):
+                    return "TIER_C" if opportunity_score >= 68.0 else "BELOW_THRESHOLD"
 
         # Tier A Quality Floors & Conviction Guards (Phase 1 Refinement)
         # Prevents high aggregate scores from masking critical subscore weaknesses

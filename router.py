@@ -199,6 +199,33 @@ class ModelRouter:
                 logger.error(f"[AI-REQ-FAIL] id={req_id} provider={provider} model={model} attempt={attempt} err={err_str}")
                 raise e
 
+    async def execute_profile(self, provider: str, model: str, prompt: str, temperature: float = 0.5, max_tokens: int = 1024, max_retries: int = 1) -> dict:
+        """Execute one explicitly selected router profile without re-ranking it.
+
+        Used by independent expert roles so one judge cannot silently switch to a
+        different model family based on another role's result. Provider/model pairs
+        still must originate from task_profiles; credentials remain router-owned.
+        """
+        allowed = {(p["provider"], p["model"]) for profiles in self.task_profiles.values() for p in profiles}
+        if (provider, model) not in allowed:
+            raise ValueError(f"Unknown router profile: {provider}/{model}")
+        req_id = str(uuid.uuid4())[:8]
+        errors = []
+        for attempt in range(max(1, max_retries)):
+            started = time.time()
+            try:
+                content = await self._make_request(provider, model, prompt, temperature, max_tokens, req_id, attempt)
+                return {
+                    "content": content,
+                    "provider": provider,
+                    "model": model,
+                    "latency_ms": round((time.time() - started) * 1000.0, 2),
+                    "fallback_used": False,
+                }
+            except Exception as exc:
+                errors.append(f"{provider}/{model}: {str(exc)}")
+        raise Exception(f"Explicit model profile failed: {errors}")
+
     async def execute_task(self, task: str, prompt: str, temperature: float = 0.7, max_tokens: int = 1024, max_retries: int = 2) -> str:
         profiles = self.task_profiles.get(task)
         if not profiles:
