@@ -18,6 +18,12 @@ from quality_engine.config import get_multi_model_evaluation_config
 from quality_engine.invented_quality import InventedQualityEvaluator
 from quality_engine.quality_improvements import compute_phonotactic_naturalness, extract_label
 
+try:
+    from router import get_model_fallback_chain
+except ImportError:
+    def get_model_fallback_chain(m: str) -> List[str]:
+        return ["qwen/qwen3.7-max:free", "mistralai/mistral-large-2512"]
+
 logger = logging.getLogger("MultiModelDomainEvaluator")
 
 ROLE_NAMES = ("linguistic", "brand", "commercial", "red_team")
@@ -80,12 +86,53 @@ def robust_statistics(scores: Sequence[float], disagreement_threshold: float = 2
         "outlier_detected": outlier,
     }
 
+
+def detect_short_but_meaningless(
+    label: str,
+    length: int,
+    pronunciation: float,
+    semantic_anchor: float,
+    commercial_clarity: float
+) -> bool:
+    """
+    Part 25: SHORT_BUT_MEANINGLESS Detector.
+    Triggers when length is strong and pronunciation is acceptable, but semantic
+    evidence is weak and commercial clarity is weak/absent.
+    """
+    return (
+        length <= 7
+        and pronunciation >= 70.0
+        and semantic_anchor <= 35.0
+        and commercial_clarity <= 40.0
+    )
+
+
+def detect_pronounceable_not_brandable(
+    pronunciation: float,
+    semantic_anchor: float,
+    brand_score: float,
+    red_team_score: float,
+    atom_score: Optional[float] = None
+) -> bool:
+    """
+    Part 26: PRONOUNCEABLE_NOT_BRANDABLE Detector.
+    Catches candidates with high phonetic balance/pronunciation, but weak semantic anchor,
+    weak brand judge score, negative red team evaluation, and low independent Atom score.
+    """
+    return (
+        pronunciation >= 74.0
+        and semantic_anchor <= 45.0
+        and (brand_score <= 60.0 or red_team_score <= 55.0 or red_team_score >= 65.0)
+        and (atom_score is None or float(atom_score) <= 7.5)
+    )
+
+
 class MultiModelDomainEvaluator:
     def __init__(self, router: Any, config: Optional[Dict[str, Any]] = None) -> None:
         self.router = router
         self.config = config or get_multi_model_evaluation_config()
         self.role_profiles = self._resolve_role_profiles()
-        self.call_budget = int(self.config.get("call_budget", int(os.getenv("MULTI_MODEL_CALL_BUDGET", "120"))))
+        self.call_budget = int(self.config.get("call_budget", int(os.getenv("MULTI_MODEL_CALL_BUDGET", "2500"))))
         self.call_count = 0
         self.runtime_stats = {
             role: {"success": 0, "failed": 0, "fallback_used": 0, "calls": 0, "latency_ms": []}
@@ -208,10 +255,13 @@ class MultiModelDomainEvaluator:
     def _normalize_atom(atom: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(atom, dict):
             return {}
-        return {k: atom[k] for k in (
-            "atom_domain_score", "atom_appraisal", "atom_market_signal",
-            "atom_positive_signals", "atom_negative_signals", "appraisal_status"
-        ) if k in atom}
+        keys = (
+            "atom_domain_score", "atom_appraisal_value", "atom_appraisal_normalized",
+            "atom_appraisal", "atom_market_signal", "status", "appraisal_status",
+            "positive_signals", "negative_signals", "atom_positive_signals", "atom_negative_signals",
+            "tld_taken_count", "tm_conflicts", "category", "internal_atom_gap", "calibration_flags"
+        )
+        return {k: atom[k] for k in keys if k in atom and atom[k] is not None}
 
     def _role_prompt(self, role: str, candidates: Sequence[Dict[str, Any]]) -> str:
         payload = json.dumps([self._candidate_evidence(c) for c in candidates], ensure_ascii=False, indent=2)
@@ -331,6 +381,71 @@ OUTPUT JSON:
             normalized.append(out)
         return normalized
 
+    async def _execute_profile_with_fallback(
+        self,
+        role: str,
+        profile: Dict[str, str],
+        prompt: str,
+        temperature: float,
+        max_tokens: int,
+        candidates: Sequence[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Executes a single model profile with dedicated per-model fallback:
+        model A -> fallback A1 -> fallback A2 while all other models continue normally.
+        """
+        orig_model = profile.get("model", "")
+        provider = profile.get("provider", "xkiro")
+        chain = [orig_model] + get_model_fallback_chain(orig_model)
+        
+        last_error = "unknown_error"
+        for idx, model_candidate in enumerate(chain):
+            attempt_profile = {"provider": provider, "model": model_candidate}
+            try:
+                response = await self._call_profile(role, attempt_profile, prompt, temperature, max_tokens)
+                parsed = self._parse_json(response.get("raw_output", ""))
+                if parsed is None:
+                    raise ValueError(f"malformed_json from {model_candidate}")
+                items = self._normalize_role_response(role, parsed)
+                if not items:
+                    raise ValueError(f"schema_validation_failed from {model_candidate}")
+                
+                fallback_used = (idx > 0)
+                if fallback_used:
+                    self.runtime_stats[role]["fallback_used"] += 1
+                
+                mapped_items = {item["domain"]: item for item in items}
+                return {
+                    "status": "SUCCESS",
+                    "original_model": orig_model,
+                    "model_used": model_candidate,
+                    "provider": provider,
+                    "fallback_used": fallback_used,
+                    "fallbacks_attempted": idx,
+                    "latency_ms": response.get("latency_ms"),
+                    "items": mapped_items,
+                    "error": None
+                }
+            except Exception as exc:
+                last_error = str(exc)
+                logger.warning(
+                    "[PER-MODEL-FALLBACK] role=%s primary=%s attempted=%s (step %d/%d) failed: %s",
+                    role, orig_model, model_candidate, idx + 1, len(chain), last_error[:160]
+                )
+                continue
+                
+        return {
+            "status": "FAILED",
+            "original_model": orig_model,
+            "model_used": orig_model,
+            "provider": provider,
+            "fallback_used": True if len(chain) > 1 else False,
+            "fallbacks_attempted": len(chain) - 1,
+            "latency_ms": None,
+            "items": {},
+            "error": last_error
+        }
+
     async def _invoke_role_batch(self, role: str, candidates: Sequence[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         if not candidates:
             return {}
@@ -345,44 +460,124 @@ OUTPUT JSON:
                     "fallback_used": False, "raw_output": None, "parsed": None, "error": "no_router_profile"
                 } for c in candidates
             }
+            
         prompt = self._role_prompt(role, candidates)
-        last_error = "role_failed"
-        for index, profile in enumerate(profiles):
-            try:
-                response = await self._call_profile(role, profile, prompt, temperature, max_tokens)
-                parsed = self._parse_json(response.get("raw_output", ""))
-                if parsed is None:
-                    raise ValueError("malformed_json")
-                items = self._normalize_role_response(role, parsed)
-                if not items:
-                    raise ValueError("schema_validation_failed")
-                response["parsed_response"] = parsed
-                mapped = {
-                    item["domain"]: {**response, "fallback_used": index > 0, "parsed": item}
-                    for item in items
+        # Execute ALL configured profiles concurrently with per-model fallback.
+        # Do NOT stop after the first success. Every available model contributes.
+        tasks = [
+            self._execute_profile_with_fallback(role, profile, prompt, temperature, max_tokens, candidates)
+            for profile in profiles
+        ]
+        outcomes = await asyncio.gather(*tasks, return_exceptions=True)
+
+        mapped: Dict[str, Dict[str, Any]] = {}
+        for c in candidates:
+            d = str(c.get("domain", "")).lower()
+            candidate_successful_evals = []
+            candidate_failed_models = []
+            candidate_succeeded_models = []
+            candidate_fallbacks_count = 0
+
+            for outcome in outcomes:
+                if isinstance(outcome, Exception) or not isinstance(outcome, dict):
+                    continue
+                orig_m = outcome.get("original_model")
+                used_m = outcome.get("model_used")
+                if outcome.get("status") == "SUCCESS" and d in outcome.get("items", {}):
+                    item = outcome["items"][d]
+                    candidate_successful_evals.append({
+                        "model": used_m,
+                        "original_model": orig_m,
+                        "eval": item,
+                        "fallback_used": outcome.get("fallback_used", False)
+                    })
+                    candidate_succeeded_models.append(used_m)
+                    if outcome.get("fallback_used"):
+                        candidate_fallbacks_count += 1
+                else:
+                    candidate_failed_models.append(orig_m)
+
+            if candidate_successful_evals:
+                # Robust median aggregation across all completing models for this role
+                aggregated_parsed = {"domain": d}
+                for field in self._required_fields(role):
+                    field_vals = [
+                        e["eval"][field] for e in candidate_successful_evals
+                        if field in e["eval"] and e["eval"][field] is not None
+                    ]
+                    if field_vals:
+                        aggregated_parsed[field] = round(statistics.median(field_vals), 3)
+                    else:
+                        aggregated_parsed[field] = None
+
+                all_crit_flags = sorted(list({
+                    flag for e in candidate_successful_evals
+                    for flag in e["eval"].get("critical_flags", [])
+                }))
+                all_kill_reasons = sorted(list({
+                    k for e in candidate_successful_evals
+                    for k in e["eval"].get("kill_reasons", [])
+                }))
+                all_crit_obj = sorted(list({
+                    o for e in candidate_successful_evals
+                    for o in e["eval"].get("critical_objections", [])
+                }))
+                aggregated_parsed["critical_flags"] = all_crit_flags
+                aggregated_parsed["kill_reasons"] = all_kill_reasons
+                aggregated_parsed["critical_objections"] = all_crit_obj
+
+                verdicts = [e["eval"].get("verdict", "REVIEW") for e in candidate_successful_evals]
+                reject_count = sum(1 for v in verdicts if v == "REJECT")
+                keep_count = sum(1 for v in verdicts if v in ["KEEP", "STRONG_KEEP"])
+                if reject_count > len(verdicts) / 2:
+                    aggregated_parsed["verdict"] = "REJECT"
+                elif keep_count > len(verdicts) / 2:
+                    aggregated_parsed["verdict"] = "KEEP"
+                else:
+                    aggregated_parsed["verdict"] = "REVIEW"
+
+                reasons = [e["eval"].get("reason", "") for e in candidate_successful_evals if e["eval"].get("reason")]
+                aggregated_parsed["reason"] = " | ".join(reasons[:3])[:1200]
+
+                mapped[d] = {
+                    "status": "SUCCESS",
+                    "provider": "xkiro_pool",
+                    "model": candidate_succeeded_models[0] if candidate_succeeded_models else "xkiro_pool",
+                    "models_expected": len(profiles),
+                    "models_called": len(profiles),
+                    "models_succeeded": len(candidate_succeeded_models),
+                    "models_failed": len(candidate_failed_models),
+                    "succeeded_models": candidate_succeeded_models,
+                    "failed_models": candidate_failed_models,
+                    "fallback_used": candidate_fallbacks_count > 0,
+                    "fallbacks_used_count": candidate_fallbacks_count,
+                    "latency_ms": None,
+                    "raw_output": f"Pool evaluated {len(candidate_successful_evals)} independent models",
+                    "parsed": aggregated_parsed,
+                    "model_evaluations": candidate_successful_evals,
+                    "error": None
                 }
-                for c in candidates:
-                    domain = str(c.get("domain", "")).lower()
-                    if domain not in mapped:
-                        mapped[domain] = {
-                            "status": "FAILED", "provider": response.get("provider"),
-                            "model": response.get("model"), "latency_ms": response.get("latency_ms"),
-                            "fallback_used": index > 0, "raw_output": response.get("raw_output"),
-                            "parsed": None, "error": "missing_domain_in_response"
-                        }
-                if index > 0:
-                    self.runtime_stats[role]["fallback_used"] += 1
-                return mapped
-            except Exception as exc:
-                last_error = str(exc)
-                continue
-        return {
-            str(c.get("domain", "")).lower(): {
-                "status": "FAILED", "provider": None, "model": None, "latency_ms": None,
-                "fallback_used": len(profiles) > 1, "raw_output": None,
-                "parsed": None, "error": last_error
-            } for c in candidates
-        }
+            else:
+                mapped[d] = {
+                    "status": "FAILED",
+                    "provider": "xkiro_pool",
+                    "model": None,
+                    "models_expected": len(profiles),
+                    "models_called": len(profiles),
+                    "models_succeeded": 0,
+                    "models_failed": len(profiles),
+                    "succeeded_models": [],
+                    "failed_models": [p.get("model") for p in profiles],
+                    "fallback_used": False,
+                    "fallbacks_used_count": 0,
+                    "latency_ms": None,
+                    "raw_output": None,
+                    "parsed": None,
+                    "model_evaluations": [],
+                    "error": "all_models_in_role_failed"
+                }
+
+        return mapped
 
     def _aggregate_candidate(self, candidate: Dict[str, Any], traces: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         roles = {role: traces.get(role, {}) for role in ROLE_NAMES}
@@ -396,31 +591,86 @@ OUTPUT JSON:
             for role in ROLE_NAMES
             if role in parsed and parsed[role].get(QUALITY_SCORE_KEYS[role]) is not None
         ]
-        stats = robust_statistics(role_scores, float(self.config.get("disagreement_threshold", 22.0)))
-        missing = len(ROLE_NAMES) - len(role_scores)
-        disagreement_penalty = min(
-            25.0,
-            float(stats.get("stddev") or 0.0) * float(self.config.get("disagreement_penalty_factor", 0.35))
+
+        # Multi-model pool coverage tracking across all 4 expert roles
+        total_unique_expected = {p["model"] for r in ROLE_NAMES for p in self.role_profiles.get(r, [])}
+        models_expected_count = len(total_unique_expected) if total_unique_expected else 57
+        unique_succeeded_models = {
+            m for r in ROLE_NAMES
+            for m in traces.get(r, {}).get("succeeded_models", [])
+        }
+        unique_failed_models = {
+            m for r in ROLE_NAMES
+            for m in traces.get(r, {}).get("failed_models", [])
+            if m not in unique_succeeded_models
+        }
+        total_fallbacks_used = sum(
+            traces.get(r, {}).get("fallbacks_used_count", 0)
+            for r in ROLE_NAMES
         )
-        missing_penalty = missing * float(self.config.get("missing_judge_penalty", 6.0))
-        red_score = parsed.get("red_team", {}).get("red_team_score")
-        red_penalty = 0.0
-        if red_score is not None and float(red_score) < float(self.config.get("red_team_low_score", 55.0)):
-            red_penalty = min(
-                20.0,
-                (float(self.config.get("red_team_low_score", 55.0)) - float(red_score))
-                * float(self.config.get("red_team_penalty_factor", 0.20)),
+        models_succeeded_count = len(unique_succeeded_models)
+        models_failed_count = len(unique_failed_models)
+        coverage_pct = round((models_succeeded_count / models_expected_count * 100.0), 1) if models_expected_count > 0 else 0.0
+        coverage_status = "MODEL_COVERAGE_COMPLETE" if coverage_pct >= 100.0 else "MODEL_COVERAGE_INCOMPLETE"
+
+        domain = str(candidate.get("domain") or candidate.get("domain_name") or "").lower()
+
+        # Log exact required single-domain telemetry
+        telemetry_log = (
+            f"\nDOMAIN: {domain}\n"
+            f"Expected models: {models_expected_count}\n"
+            f"Completed models: {models_succeeded_count}\n"
+            f"Fallbacks: {total_fallbacks_used}\n"
+            f"Coverage: {coverage_pct:.1f}%\n"
+            f"Status: {coverage_status}"
+        )
+        logger.info(telemetry_log)
+        print(telemetry_log, flush=True)
+
+        deterministic_fallback = False
+        if not role_scores:
+            # All models failed or no AI role succeeded: use deterministic evaluation fallback (Requirement 4)
+            deterministic_fallback = True
+            logger.warning("[MULTI-MODEL-FALLBACK-DETERMINISTIC] All models failed for %s. Using deterministic evaluation fallback.", domain)
+            det_q = float(candidate.get("quality_score") or candidate.get("overall_score") or 68.0)
+            consensus = round(det_q, 1)
+            confidence = min(60.0, max(50.0, det_q))
+            stats = {
+                "median": consensus, "trimmed_mean": consensus, "stddev": 0.0,
+                "range": 0.0, "judge_agreement": 75.0, "high_disagreement": False, "outlier_detected": False
+            }
+            disagreement_penalty = 0.0
+            missing_penalty = 0.0
+            red_score = 70.0
+            red_penalty = 0.0
+            missing = 0
+        else:
+            stats = robust_statistics(role_scores, float(self.config.get("disagreement_threshold", 22.0)))
+            missing = len(ROLE_NAMES) - len(role_scores)
+            disagreement_penalty = min(
+                25.0,
+                float(stats.get("stddev") or 0.0) * float(self.config.get("disagreement_penalty_factor", 0.35))
             )
-        consensus = stats.get("median")
-        confidence = max(
-            0.0,
-            min(
-                100.0,
-                float(stats.get("judge_agreement") or 0.0)
-                - missing_penalty
-                - disagreement_penalty * 0.75,
-            ),
-        )
+            missing_penalty = missing * float(self.config.get("missing_judge_penalty", 6.0))
+            red_score = parsed.get("red_team", {}).get("red_team_score")
+            red_penalty = 0.0
+            if red_score is not None and float(red_score) < float(self.config.get("red_team_low_score", 55.0)):
+                red_penalty = min(
+                    20.0,
+                    (float(self.config.get("red_team_low_score", 55.0)) - float(red_score))
+                    * float(self.config.get("red_team_penalty_factor", 0.20)),
+                )
+            consensus = stats.get("median")
+            confidence = max(
+                0.0,
+                min(
+                    100.0,
+                    float(stats.get("judge_agreement") or 0.0)
+                    - missing_penalty
+                    - disagreement_penalty * 0.75,
+                ),
+            )
+
         invented_subtype = str(candidate.get("invented_subtype") or candidate.get("invented_analysis", {}).get("invented_subtype") or "")
         semantic_det = _clamp(candidate.get("semantic_anchor_score") or candidate.get("invented_analysis", {}).get("semantic_anchor_score"))
         semantic_quality = _clamp(parsed.get("linguistic", {}).get("semantic_anchor_quality")) or semantic_det
@@ -453,15 +703,27 @@ OUTPUT JSON:
         commercial_quality = _clamp(parsed.get("commercial", {}).get("commercial_strength"))
         short_meaningless = (
             len(label) <= int(self.config.get("short_meaningless_max_length", 7))
-            and invented_subtype == "UNANCHORED"
+            and (invented_subtype == "UNANCHORED" or not candidate.get("semantic_anchors"))
             and float(semantic_quality or 0) <= float(self.config.get("short_meaningless_semantic_max", 50.0))
             and float(commercial_quality or 0) <= float(self.config.get("short_meaningless_commercial_max", 60.0))
+        )
+        pron_score = float(candidate.get("pronunciation_score") or candidate.get("pronunciation") or (candidate.get("deterministic") or {}).get("pronunciation", 70.0))
+        brand_judge_score = _clamp(parsed.get("brand", {}).get("brand_strength")) or 50.0
+        atom_val = (candidate.get("atom") or {}).get("atom_domain_score") or candidate.get("atom_domain_score")
+        pronounceable_not_brandable = (
+            pron_score >= 74.0
+            and len(label) <= 8
+            and float(semantic_quality or 0) <= 45.0
+            and (brand_judge_score <= 60.0 or (red_score is not None and float(red_score) <= 55.0))
+            and (atom_val is None or float(atom_val) <= 7.5)
         )
         preliminary = None
         if consensus is not None:
             preliminary = float(consensus) - disagreement_penalty - missing_penalty - red_penalty
             if short_meaningless:
                 preliminary -= 15.0
+            if pronounceable_not_brandable:
+                preliminary -= 18.0
             if severe_phonetic:
                 preliminary = min(preliminary, float(self.config.get("deterministic_severe_phonetic_ceiling", 59)))
             if invented_subtype == "UNANCHORED":
@@ -481,6 +743,14 @@ OUTPUT JSON:
             },
             "consensus_confidence": round(confidence, 3),
             "outlier_detected": bool(stats.get("outlier_detected", False)),
+            "models_expected": models_expected_count,
+            "models_called": models_expected_count,
+            "models_succeeded": models_succeeded_count,
+            "models_failed": models_failed_count,
+            "fallbacks_used": total_fallbacks_used,
+            "model_coverage_pct": coverage_pct,
+            "model_coverage_status": coverage_status,
+            "deterministic_fallback": deterministic_fallback,
             "consensus": {
                 "robust_median": consensus,
                 "robust_trimmed_mean": stats.get("trimmed_mean"),
@@ -496,12 +766,15 @@ OUTPUT JSON:
                 "semantic_quality": semantic_quality,
                 "gibberish_risk": round(gibberish_risk, 3),
                 "ai_pattern_risk": _clamp(parsed.get("brand", {}).get("ai_generated_feel")) or _clamp(parsed.get("red_team", {}).get("ai_pattern_risk")) or 50.0,
+                "atom_alignment": 80.0,
+                "model_agreement": stats.get("judge_agreement", 0.0),
                 "arbiter_status": "PENDING",
                 "verdict": "REVIEW",
             },
             "gibberish_risk_score": round(gibberish_risk, 3),
             "gibberish_quality_band": gibberish_band,
             "short_but_meaningless": short_meaningless,
+            "pronounceable_not_brandable": pronounceable_not_brandable,
             "selection_reasons": [
                 f"Independent robust consensus: {preliminary:.1f}" if preliminary is not None else "No AI consensus available",
                 f"Consensus confidence: {confidence:.1f}",
@@ -557,6 +830,8 @@ Return STRICT JSON:
   "final_semantic_quality": 0-100,
   "final_gibberish_risk": 0-100,
   "final_ai_pattern_risk": 0-100,
+  "atom_alignment": 0-100,
+  "model_agreement": 0-100,
   "major_strengths": [],
   "major_weaknesses": [],
   "critical_flags": [],
@@ -585,11 +860,13 @@ Return STRICT JSON:
                 for key in (
                     "consensus_score", "confidence", "final_brand_quality", "final_linguistic_quality",
                     "final_commercial_quality", "final_buyer_quality", "final_semantic_quality",
-                    "final_gibberish_risk", "final_ai_pattern_risk"
+                    "final_gibberish_risk", "final_ai_pattern_risk", "atom_alignment", "model_agreement"
                 ):
-                    normalized["consensus"][key] = _clamp(parsed.get(key))
-                normalized["consensus"]["major_strengths"] = _list(parsed.get("major_strengths"))
-                normalized["consensus"]["major_weaknesses"] = _list(parsed.get("major_weaknesses"))
+                    val = _clamp(parsed.get(key))
+                    if val is not None:
+                        normalized["consensus"][key] = val
+                normalized["consensus"]["major_strengths"] = _list(parsed.get("major_strengths") or parsed.get("strengths"))
+                normalized["consensus"]["major_weaknesses"] = _list(parsed.get("major_weaknesses") or parsed.get("weaknesses"))
                 normalized["consensus"]["critical_flags"] = _list(parsed.get("critical_flags"))
                 normalized["consensus"]["verdict"] = str(parsed.get("verdict", "REVIEW")).upper()
                 if normalized["consensus"]["verdict"] not in {"STRONG_KEEP", "KEEP", "REVIEW", "REJECT"}:
@@ -625,11 +902,16 @@ Return STRICT JSON:
         result = await self.evaluate_batch([{"domain": domain, **(context or {})}], context=context)
         return result.get("candidates", {}).get(str(domain).lower(), {})
 
-    async def evaluate_batch(self, candidates: Sequence[Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def evaluate_judges_batch(self, candidates: Sequence[Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Executes the 4 expert judges (Linguistic, Brand, Commercial, Red Team) independently in batch.
+        Produces robust preliminary consensus without running the Arbiter.
+        """
         if not candidates:
-            return {"candidates": {}, "summary": self._summary()}
+            return {"candidates": {}, "prepared_map": {}, "summary": self._summary()}
         if not bool(self.config.get("enabled", True)):
-            return {"candidates": {}, "summary": self._summary(disabled=True)}
+            return {"candidates": {}, "prepared_map": {}, "summary": self._summary(disabled=True)}
+
         prepared: List[Dict[str, Any]] = []
         for item in candidates:
             if isinstance(item, str):
@@ -638,6 +920,7 @@ Return STRICT JSON:
                 merged = dict(context or {})
                 merged.update(item)
                 prepared.append(merged)
+
         batch_size = max(1, int(self.config.get("judge_batch_size", 5)))
         chunks = [prepared[i:i + batch_size] for i in range(0, len(prepared), batch_size)]
 
@@ -668,6 +951,7 @@ Return STRICT JSON:
                 by_role[role] = data
 
         output: Dict[str, Dict[str, Any]] = {}
+        prepared_map = {str(c.get("domain", "")).lower(): c for c in prepared}
         for candidate in prepared:
             domain = str(candidate.get("domain", "")).lower()
             traces = {
@@ -679,21 +963,46 @@ Return STRICT JSON:
             }
             output[domain] = self._aggregate_candidate(candidate, traces)
 
+        return {"candidates": output, "prepared_map": prepared_map, "summary": self._summary()}
+
+    async def run_arbiters_for_pool(
+        self,
+        prepared_map: Dict[str, Dict[str, Any]],
+        candidates_eval: Dict[str, Dict[str, Any]],
+        pool_size: Optional[int] = None
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Runs Consensus Arbiter for the top candidate pool (which can now include Atom appraisal data).
+        """
+        if not bool(self.config.get("arbiter_enabled", True)) or not bool(self.config.get("arbiter", {}).get("enabled", True)):
+            return candidates_eval
+
+        limit = pool_size if pool_size is not None else int(self.config.get("arbiter_pool_size", 20))
         arbiter_pool = sorted(
-            output.values(),
+            candidates_eval.values(),
             key=lambda x: float(x.get("consensus", {}).get("consensus_score") or 0.0),
             reverse=True
-        )[:max(0, int(self.config.get("arbiter_pool_size", 20)))]
-        prepared_map = {str(c.get("domain", "")).lower(): c for c in prepared}
-        if arbiter_pool and bool(self.config.get("arbiter_enabled", True)) and bool(self.config.get("arbiter", {}).get("enabled", True)):
+        )[:max(0, limit)]
+
+        if arbiter_pool:
             arbiter_results = await asyncio.gather(
-                *(self._run_arbiter(prepared_map[item["domain"]], item) for item in arbiter_pool),
+                *(self._run_arbiter(prepared_map.get(item["domain"], {"domain": item["domain"]}), item) for item in arbiter_pool),
                 return_exceptions=True,
             )
             for result in arbiter_results:
-                if not isinstance(result, Exception):
-                    output[result["domain"]] = result
-        return {"candidates": output, "summary": self._summary()}
+                if not isinstance(result, Exception) and isinstance(result, dict) and "domain" in result:
+                    candidates_eval[result["domain"]] = result
+
+        return candidates_eval
+
+    async def evaluate_batch(self, candidates: Sequence[Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Runs the complete multi-model pipeline: 4 expert judges followed by Arbiter."""
+        judges_res = await self.evaluate_judges_batch(candidates, context=context)
+        candidates_map = judges_res.get("candidates", {})
+        prepared_map = judges_res.get("prepared_map", {})
+        if candidates_map and bool(self.config.get("arbiter_enabled", True)):
+            candidates_map = await self.run_arbiters_for_pool(prepared_map, candidates_map)
+        return {"candidates": candidates_map, "summary": self._summary()}
 
     def _summary(self, disabled: bool = False) -> Dict[str, Any]:
         return {

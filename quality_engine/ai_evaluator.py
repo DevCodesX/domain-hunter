@@ -110,6 +110,28 @@ def compute_deterministic_linguistic_evaluation(domain: str, concept: str = "") 
     commercial = round(max(35.0, min(97.0, (brandability * 0.40) + (startup_nat * 0.35) + (simp_score * 0.25) + h_comm)), 3)
     buyer_clarity = round(max(35.0, min(97.0, (commercial * 0.60) + (startup_nat * 0.40))), 3)
 
+    # NO HIGH SCORE WITHOUT EVIDENCE
+    # If the candidate has no verified lexical or compound evidence, cap synthetic brandability
+    try:
+        from quality_engine.one_word_engine import OneWordQualityEngine
+        owe = OneWordQualityEngine()
+        is_dict, _ = owe.is_dictionary_word(label)
+        is_auth_compound = False
+        if not is_dict and n >= 6:
+            for sp in range(3, n - 2):
+                if owe.is_dictionary_word(label[:sp])[0] and owe.is_dictionary_word(label[sp:])[0]:
+                    is_auth_compound = True
+                    break
+
+        if not is_dict and not is_auth_compound:
+            natural_brand = round(max(25.0, min(68.0, natural_brand * 0.76)), 3)
+            brandability = round(max(25.0, min(68.0, brandability * 0.74)), 3)
+            startup_nat = round(max(25.0, min(65.0, startup_nat * 0.74)), 3)
+            commercial = round(max(25.0, min(62.0, commercial * 0.74)), 3)
+            buyer_clarity = round(max(25.0, min(60.0, buyer_clarity * 0.74)), 3)
+    except Exception:
+        pass
+
     return {
         "natural_brand_score": natural_brand,
         "startup_naturalness_score": startup_nat,

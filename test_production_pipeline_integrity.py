@@ -104,6 +104,18 @@ async def test_production_orchestration_run_integrity():
         # Disable external live network USPTO queries during test for deterministic speed
         scheduler.trademark_engine.providers = []
 
+        from services.atom_appraisal_service import AtomAppraisalResult
+        async def mock_appraise(d, use_cache=True):
+            return AtomAppraisalResult(
+                domain=d,
+                status="SUCCESS",
+                atom_domain_score=8.7,
+                atom_appraisal_value=2500,
+                positive_signals=["Short", "Brandable"],
+                negative_signals=[]
+            )
+        scheduler.atom_service.appraise_domain = mock_appraise
+
         # Execute full hunt pipeline
         run_results = await scheduler.run_domain_hunt(trigger="test_audit", geo="us")
     finally:
@@ -337,7 +349,9 @@ def test_api_run_isolation_and_no_defaults(test_client):
                 "naming_type": "INVENTED",
                 "scan_id": "hunt_isolated_current_run",
                 "ip_risk_level": "NOT_CHECKED",
-                "ip_check_status": "NOT_CHECKED"
+                "ip_check_status": "NOT_CHECKED",
+                "atom_status": "SUCCESS",
+                "atom_domain_score": 8.7
             }
         ]
     }

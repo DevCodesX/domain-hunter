@@ -39,6 +39,14 @@ from quality_engine import (
     EvolutionaryGenerator,
     MultiModelDomainEvaluator
 )
+from quality_engine.config import get_atom_config
+from services.atom_appraisal_service import (
+    AtomAppraisalService,
+    AtomAppraisalResult,
+    AtomProviderHealth,
+    normalize_atom_appraisal,
+    calculate_atom_calibration
+)
 
 # Phase 4: Self-Learning & Feedback Learning Modules
 from learning_engine import (
@@ -131,7 +139,7 @@ def save_job_state(state: Dict[str, Any]):
         logger.error(f"Error saving {STATE_FILE}: {e}")
 
 class DomainHunterPipeline:
-    def __init__(self, router: ModelRouter, http_client, availability_engine: Optional[AvailabilityEngine] = None):
+    def __init__(self, router: ModelRouter, http_client, availability_engine: Optional[AvailabilityEngine] = None, atom_service: Optional[Any] = None):
         self.router = router
         self.http_client = http_client
         if is_production_mode():
@@ -151,6 +159,9 @@ class DomainHunterPipeline:
             self.availability_engine = availability_engine or AvailabilityEngine(http_client)
         self.is_running = False
         self._lock = asyncio.Lock()
+
+        # Initialize External Market Appraisal Provider (Atom)
+        self.atom_service = atom_service or AtomAppraisalService.get_instance()
 
         # Initialize Phase 1 Quality Engine components
         self.feature_extractor = QualityFeatureExtractor()
@@ -237,13 +248,35 @@ class DomainHunterPipeline:
             "ai_evaluated": 0,
             "multi_model_evaluated": 0,
             "multi_model_summary": {},
+            "atom_eligible": 0,
+            "atom_requested": 0,
+            "atom_validated": 0,
+            "atom_pass": 0,
+            "atom_rejected": 0,
             "consensus_pass": 0,
             "quality_floor_pass": 0,
             "learned_ranked": 0,
             "diversity_input": 0,
             "diversity_selected": 0,
             "final": 0,
-            "funnel_rejections": {"availability": 0, "ip": 0, "deterministic_quality": 0, "consensus": 0, "quality_floor": 0, "diversity": 0},
+            "funnel_rejections": {
+                "availability": 0,
+                "ip": 0,
+                "deterministic_quality": 0,
+                "consensus": 0,
+                "quality_floor": 0,
+                "diversity": 0,
+                "atom": 0,
+                "rejected_by_atom": 0,
+                "rejected_by_linguistic": 0,
+                "rejected_by_brand": 0,
+                "rejected_by_commercial": 0,
+                "rejected_by_red_team": 0,
+                "rejected_by_quality_floor": 0,
+                "rejected_by_invented_policy": 0,
+                "rejected_by_ip": 0,
+                "rejected_by_diversity": 0
+            },
             # Section 6 explicit production metrics:
             "one_word_generated": 0,
             "one_word_available": 0,
@@ -348,12 +381,41 @@ class DomainHunterPipeline:
                 target_total=1950
             )
 
-            # Evolutionary generation pass to enrich linguistic variety
+            # Evolutionary generation pass to enrich linguistic variety (Part I)
+            # Evolutionary seeds must be selected using deterministic pre-quality ranking,
+            # excluding weak/unanchored/malformed candidates.
             if len(raw_strategy_records) >= 20:
-                mutations = self.evolutionary_generator.generate_mutations(raw_strategy_records[:30], mutation_count_per_seed=2)
-                raw_strategy_records.extend(mutations)
+                from quality_engine.pre_availability import calculate_pre_availability_score
+                from quality_engine.invented_quality import InventedQualityEvaluator
 
-            funnel_stats["raw_generated"] = len(raw_strategy_records)
+                eligible_seeds = []
+                for rec in raw_strategy_records:
+                    d_raw = rec.get("domain", "")
+                    lbl = d_raw.lower().replace(".com", "").strip()
+                    if len(lbl) < 4 or len(lbl) > 12 or not lbl.isalpha():
+                        continue
+
+                    # Filter out weak/unanchored invented candidates from seed pool
+                    strat = rec.get("generation_strategy", "")
+                    if strat == "INVENTED":
+                        eval_res = InventedQualityEvaluator.get_instance().evaluate_candidate(lbl)
+                        inv_tier = eval_res.get("invented_quality_tier")
+                        inv_sub = eval_res.get("invented_subtype")
+                        if inv_tier in ["EXTREMELY_WEAK", "WEAK"] or inv_sub == "UNANCHORED":
+                            continue
+
+                    score = calculate_pre_availability_score(rec)
+                    eligible_seeds.append((score, rec))
+
+                eligible_seeds.sort(key=lambda x: x[0], reverse=True)
+                top_seeds = [s[1] for s in eligible_seeds[:30]]
+                if top_seeds:
+                    mutations = self.evolutionary_generator.generate_mutations(top_seeds, mutation_count_per_seed=2)
+                    raw_strategy_records.extend(mutations)
+
+            raw_generated_total = len(raw_strategy_records)
+            funnel_stats["raw_generated"] = raw_generated_total
+            funnel_stats["raw_generated_total"] = raw_generated_total
             funnel_stats["one_word_generated"] = sum(
                 1 for rec in raw_strategy_records if rec.get("generation_strategy") == "ONE_WORD"
             )
@@ -388,9 +450,66 @@ class DomainHunterPipeline:
                 "KEYWORD_BRANDABLE": funnel_stats["keyword_generated"]
             }
             funnel_stats["one_word_funnel"]["generated"] = funnel_stats["one_word_generated"] + funnel_stats["foreign_generated"]
+
+            # Compute invented subdistribution & generation quality telemetry (Part 38)
+            from quality_engine.invented_quality import InventedQualityEvaluator
+            evaluator = InventedQualityEvaluator.get_instance()
+            inv_recs = [r for r in raw_strategy_records if r.get("generation_strategy") == "INVENTED"]
+            anchored_inv = 0
+            unanchored_inv = 0
+            exploration_inv = 0
+            strong_anchored_inv = 0
+            moderate_anchored_inv = 0
+            weak_anchored_inv = 0
+            extremely_weak_inv = 0
+
+            for r in inv_recs:
+                d_label = r.get("domain", "").lower().replace(".com", "").strip()
+                ev = evaluator.evaluate_candidate(d_label)
+                sub = ev.get("invented_subtype")
+                tier = ev.get("invented_quality_tier")
+
+                if tier == "STRONG" or sub in ["LEXICAL_ANCHORED", "SEMANTIC_ANCHORED", "HYBRID_ANCHORED"]:
+                    strong_anchored_inv += 1
+                    anchored_inv += 1
+                elif tier == "MODERATE" or sub in ["PHONETIC_ANCHORED", "MODERATE_ANCHORED"]:
+                    moderate_anchored_inv += 1
+                    anchored_inv += 1
+                elif tier == "WEAK":
+                    weak_anchored_inv += 1
+                    unanchored_inv += 1
+                elif tier == "EXTREMELY_WEAK":
+                    extremely_weak_inv += 1
+                    unanchored_inv += 1
+                else:
+                    unanchored_inv += 1
+
+                if r.get("is_exploration") or r.get("invented_subdistribution") == "EXPLORATION_INVENTED":
+                    exploration_inv += 1
+
+            funnel_stats["invented_subdistribution"] = {
+                "INVENTED_TOTAL": len(inv_recs),
+                "ANCHORED_INVENTED": anchored_inv,
+                "UNANCHORED_INVENTED": unanchored_inv,
+                "EXPLORATION_INVENTED": exploration_inv,
+                "STRONG_ANCHORED": strong_anchored_inv,
+                "MODERATE_ANCHORED": moderate_anchored_inv,
+                "WEAK_ANCHORED": weak_anchored_inv,
+                "EXTREMELY_WEAK": extremely_weak_inv,
+            }
+            funnel_stats["generation_quality_telemetry"] = {
+                "strategy_distribution": funnel_stats["strategy_distribution"],
+                "INVENTED_TOTAL": len(inv_recs),
+                "STRONG_ANCHORED": strong_anchored_inv,
+                "MODERATE_ANCHORED": moderate_anchored_inv,
+                "WEAK_ANCHORED": weak_anchored_inv,
+                "UNANCHORED": unanchored_inv,
+                "EXTREMELY_WEAK": extremely_weak_inv,
+            }
             logger.info(
-                f"[STAGE 3] Generated {len(raw_strategy_records)} raw candidates across 7 strategies. "
-                f"(Distribution: {funnel_stats['strategy_distribution']})"
+                f"[STAGE 3] Raw generated total: {raw_generated_total} candidates across 7 strategies. "
+                f"Strategy distribution: {funnel_stats['strategy_distribution']}. "
+                f"Invented telemetry: {funnel_stats['generation_quality_telemetry']}"
             )
 
             # ==========================================
@@ -415,9 +534,11 @@ class DomainHunterPipeline:
 
                 # Linguistic classification (single authoritative source for naming_type)
                 naming_info = self.naming_classifier.classify(norm)
-                # If designated as REAL_FOREIGN_WORD by multilingual engine, preserve it!
-                if rec.get("naming_type") == "REAL_FOREIGN_WORD":
+                # If designated as REAL_FOREIGN_WORD by multilingual engine or classifier, preserve and propagate language
+                if rec.get("naming_type") == "REAL_FOREIGN_WORD" or naming_info.get("naming_type") == "REAL_FOREIGN_WORD":
                     naming_info["naming_type"] = "REAL_FOREIGN_WORD"
+                    if rec.get("source_language") in [None, "en"]:
+                        rec["source_language"] = naming_info.get("source_language", "Latin")
 
                 one_word_eval = self.one_word_engine.compute_one_word_score(norm)
                 cand_id = f"cand_{scan_id}_{len(validated_candidates)+1:04d}"
@@ -429,6 +550,7 @@ class DomainHunterPipeline:
                     "scan_id": scan_id,
                     "domain": norm,
                     "naming_type": naming_info["naming_type"],
+                    "source_language": rec.get("source_language") or naming_info.get("source_language", "en"),
                     "structural_features": features,
                     "naming_type_info": naming_info,
                     "one_word_features": one_word_eval
@@ -722,11 +844,14 @@ class DomainHunterPipeline:
                     "ip_risk_level": c.get("ip_report").ip_risk_level.value if c.get("ip_report") else None,
                     "ip_check_status": getattr(c.get("ip_report"), "ip_check_status", None),
                 })
-            multi_eval_result = await self.multi_model_evaluator.evaluate_batch(mm_context, context={"concept": concepts[0] if concepts else ""}) if mm_context else {"candidates": {}, "summary": {}}
-            multi_evaluations = multi_eval_result.get("candidates", {})
+            judges_res = await self.multi_model_evaluator.evaluate_judges_batch(
+                mm_context, context={"concept": concepts[0] if concepts else ""}
+            ) if mm_context else {"candidates": {}, "prepared_map": {}, "summary": {}}
+            multi_evaluations = judges_res.get("candidates", {})
+            prepared_map = judges_res.get("prepared_map", {})
             funnel_stats["multi_model_evaluated"] = len(multi_evaluations)
             funnel_stats["ai_evaluated"] = len(multi_evaluations)
-            funnel_stats["multi_model_summary"] = multi_eval_result.get("summary", {})
+            funnel_stats["multi_model_summary"] = judges_res.get("summary", {})
 
             scored_candidates: List[Dict[str, Any]] = []
             for cand in ip_screened_pool:
@@ -968,6 +1093,91 @@ class DomainHunterPipeline:
                 }
                 scored_candidates.append(full_record)
 
+            # Phase 2.8 Atom Domain Appraisal Integration & Diversified Pre-Selection Pool (Parts 7, 8, 9, 10, 22)
+            atom_cfg = get_atom_config()
+            atom_max_budget = int(atom_cfg.get("max_appraisals_per_run", 10))
+            atom_selected_candidates = self.atom_service.select_candidates_for_atom(scored_candidates, max_budget=atom_max_budget)
+            atom_domains = [c["domain"] for c in atom_selected_candidates]
+            funnel_stats["atom_eligible"] = len(scored_candidates)
+            funnel_stats["atom_requested"] = len(atom_domains)
+
+            logger.info(
+                f"[STAGE 8-ATOM] Requesting Atom Domain Appraisal for {len(atom_domains)} diversified candidates "
+                f"(max_budget={atom_max_budget}). Domains: {atom_domains}"
+            )
+            atom_results = await self.atom_service.appraise_batch(atom_domains, max_budget=atom_max_budget)
+
+            min_atom_score = float(atom_cfg.get("min_domain_score", 8.0))
+            for cand in scored_candidates:
+                d = cand["domain"]
+                if d in atom_results:
+                    atom_res = atom_results[d]
+                    atom_dict = atom_res.model_dump() if hasattr(atom_res, "model_dump") else (atom_res.dict() if hasattr(atom_res, "dict") else dict(atom_res))
+                    cand["atom"] = atom_dict
+                    cand["atom_domain_score"] = atom_res.atom_domain_score
+                    cand["atom_appraisal_value"] = atom_res.atom_appraisal_value
+                    cand["atom_appraisal_normalized"] = atom_res.atom_appraisal_normalized
+                    cand["atom_status"] = atom_res.status
+                    if atom_res.is_successful():
+                        funnel_stats["atom_validated"] += 1
+                        if atom_res.passes_minimum_score(min_atom_score):
+                            funnel_stats["atom_pass"] += 1
+                            cand["atom_gate_status"] = "ATOM_VALIDATED"
+                        else:
+                            funnel_stats["atom_rejected"] += 1
+                            cand["atom_gate_status"] = "ATOM_REJECTED"
+                            funnel_stats["funnel_rejections"]["rejected_by_atom"] += 1
+                    else:
+                        funnel_stats["atom_rejected"] += 1
+                        cand["atom_gate_status"] = f"ATOM_{atom_res.status}"
+                        funnel_stats["funnel_rejections"]["rejected_by_atom"] += 1
+
+                    calibration = calculate_atom_calibration(
+                        internal_overall_score=float(cand.get("overall_score", 70.0)),
+                        internal_brandability=float(cand.get("brandability_score", 70.0)),
+                        internal_commercial_score=float(cand.get("commercial_score", 70.0)),
+                        atom_domain_score=atom_res.atom_domain_score,
+                        atom_appraisal_value=atom_res.atom_appraisal_value
+                    )
+                    cand["atom_calibration"] = calibration
+
+                    # Pass Atom appraisal evidence into Arbiter prepared_map
+                    if d in prepared_map:
+                        prepared_map[d]["atom"] = atom_dict
+                        prepared_map[d]["atom_calibration"] = calibration
+                else:
+                    cand["atom"] = {"provider": "ATOM", "status": "NOT_EVALUATED", "domain": d}
+                    cand["atom_domain_score"] = None
+                    cand["atom_appraisal_value"] = None
+                    cand["atom_appraisal_normalized"] = None
+                    cand["atom_status"] = "NOT_EVALUATED"
+                    cand["atom_gate_status"] = "ATOM_UNVALIDATED"
+                    cand["atom_calibration"] = calculate_atom_calibration(
+                        float(cand.get("overall_score", 70.0)),
+                        float(cand.get("brandability_score", 70.0)),
+                        float(cand.get("commercial_score", 70.0)),
+                        None, None
+                    )
+
+            # Consensus Arbiter with Atom appraisal evidence integrated
+            arbiter_pool_size = int(self.multi_model_evaluator.config.get("arbiter_pool_size", 20))
+            multi_evaluations = await self.multi_model_evaluator.run_arbiters_for_pool(prepared_map, multi_evaluations, pool_size=arbiter_pool_size)
+            funnel_stats["multi_model_summary"] = self.multi_model_evaluator._summary()
+
+            # Refresh candidate records with arbiter conclusions
+            for cand in scored_candidates:
+                d = cand["domain"]
+                if d in multi_evaluations:
+                    cand["multi_model_review"] = copy.deepcopy(multi_evaluations[d])
+                    cand["consensus"] = copy.deepcopy(multi_evaluations[d].get("consensus", {}))
+                    cand["consensus_confidence"] = multi_evaluations[d].get("consensus_confidence")
+                    cand["judge_agreement"] = multi_evaluations[d].get("judge_agreement")
+                    cand["judge_disagreement"] = copy.deepcopy(multi_evaluations[d].get("judge_disagreement", {}))
+                    cand["gibberish_risk_score"] = multi_evaluations[d].get("gibberish_risk_score")
+                    cand["gibberish_quality_band"] = multi_evaluations[d].get("gibberish_quality_band")
+                    cand["short_but_meaningless"] = multi_evaluations[d].get("short_but_meaningless", False)
+                    cand["pronounceable_not_brandable"] = multi_evaluations[d].get("pronounceable_not_brandable", False)
+
             # Score Distribution Guard & Cluster Detection (Requirement 7)
             from quality_engine.score_guard import ScoreDistributionGuard
             score_integrity_audit = ScoreDistributionGuard.audit_scored_batch(scored_candidates)
@@ -1015,8 +1225,63 @@ class DomainHunterPipeline:
             # ==========================================
             update_stage("final_selection")
 
-            # Section 12 & Section 8 Hard Safety Invariants:
-            # A candidate may enter final opportunities ONLY IF verified by an authoritative provider.
+            # Stage 9 Funnel Counters & Rejection Tracking (Section 1 & 6)
+            funnel_counters = {
+                "available_standard": 0,
+                "safe_scored": 0,
+                "consensus_input": 0,
+                "consensus_pass": 0,
+                "quality_floor_pass": 0,
+                "atom_validated": 0,
+                "learning_ranked": 0,
+                "diversity_input": 0,
+                "final": 0,
+                # Legacy alias support for existing tests
+                "stage9_safe_scored": 0,
+                "stage9_final_judge_approved": 0,
+                "stage9_word_glue_passed": 0,
+                "stage9_quality_threshold_passed": 0,
+                "stage9_quality_floor_passed": 0,
+                "stage9_learning_ranked": 0,
+                "stage9_diversity_input": 0,
+                "stage9_diversity_selected": 0,
+                "stage9_final_selected": 0
+            }
+            rejection_reasons = {
+                "consensus_rejected": 0,
+                "missing_model_evaluation": 0,
+                "low_confidence": 0,
+                "quality_floor": 0,
+                "brand_floor": 0,
+                "commercial_floor": 0,
+                "linguistic_floor": 0,
+                "gibberish": 0,
+                "short_but_meaningless": 0,
+                "red_team": 0,
+                "diversity": 0,
+                "atom_unvalidated": 0,
+                "atom_score_too_low": 0,
+                "atom_not_connected": 0,
+                # Legacy alias support
+                "final_judge_rejected": 0,
+                "word_glue_rejected": 0,
+                "quality_rejected": 0,
+                "invented_quality_rejected": 0,
+                "tier_floor_rejected": 0,
+                "phonetic_cluster_rejected": 0,
+                "prefix_saturation_rejected": 0,
+                "category_quota_rejected": 0,
+                "rejected_by_atom": 0
+            }
+
+            # 1. AVAILABLE_STANDARD count from availability check
+            available_standard_candidates = [
+                c for c in scored_candidates
+                if (c.get("availability_status") == AvailabilityStatus.AVAILABLE_STANDARD.value or c.get("availability_status") == "AVAILABLE_STANDARD")
+            ]
+            funnel_counters["available_standard"] = len(available_standard_candidates)
+
+            # 2. SAFE_SCORED: Hard Safety Invariants
             safe_scored_candidates = []
             for c in scored_candidates:
                 d = c.get("domain", "")
@@ -1027,51 +1292,47 @@ class DomainHunterPipeline:
                 check_status = c.get("availability_check_status") if "availability_check_status" in c else getattr(res_obj, "availability_check_status", "UNVERIFIED")
 
                 if is_production_mode():
-                    # 1. Provider must not be mock
                     if not prov or prov in MOCK_REGISTRY_PROVIDERS or "mock" in str(prov).lower():
-                        logger.critical(
-                            f"[SAFETY-ASSERTION-REJECT] Candidate {d} uses mock provider '{prov}' in production! Rejecting."
-                        )
+                        logger.critical(f"[SAFETY-ASSERTION-REJECT] Candidate {d} uses mock provider '{prov}' in production! Rejecting.")
+                        c["selection_rejection_stage"] = "SAFE_SCORED"
+                        c["selection_rejection_reason"] = "mock_provider_in_production"
                         continue
-                    # 2. Provider must be an authoritative registry provider
                     if prov not in REAL_REGISTRY_PROVIDERS:
-                        logger.critical(
-                            f"[SAFETY-ASSERTION-REJECT] Candidate {d} provider '{prov}' is not in REAL_REGISTRY_PROVIDERS! Rejecting."
-                        )
+                        logger.critical(f"[SAFETY-ASSERTION-REJECT] Candidate {d} provider '{prov}' is not in REAL_REGISTRY_PROVIDERS! Rejecting.")
+                        c["selection_rejection_stage"] = "SAFE_SCORED"
+                        c["selection_rejection_reason"] = "unauthoritative_registry"
                         continue
-                    # 3. Availability must be explicitly verified
                     if not verified:
-                        logger.critical(
-                            f"[SAFETY-ASSERTION-REJECT] Candidate {d} availability_verified is False in production! Rejecting."
-                        )
+                        logger.critical(f"[SAFETY-ASSERTION-REJECT] Candidate {d} availability_verified is False in production! Rejecting.")
+                        c["selection_rejection_stage"] = "SAFE_SCORED"
+                        c["selection_rejection_reason"] = "unverified_availability"
                         continue
-                    # 4. Check status must be VERIFIED
                     if check_status != "VERIFIED":
-                        logger.critical(
-                            f"[SAFETY-ASSERTION-REJECT] Candidate {d} availability_check_status '{check_status}' != VERIFIED! Rejecting."
-                        )
+                        logger.critical(f"[SAFETY-ASSERTION-REJECT] Candidate {d} availability_check_status '{check_status}' != VERIFIED! Rejecting.")
+                        c["selection_rejection_stage"] = "SAFE_SCORED"
+                        c["selection_rejection_reason"] = "unverified_status"
                         continue
 
-                # Hard invariants regardless of environment
                 if status_val != AvailabilityStatus.AVAILABLE_STANDARD.value and status_val != "AVAILABLE_STANDARD":
-                    logger.warning(f"[SAFETY-ASSERTION-REJECT] Candidate {d} status '{status_val}' != AVAILABLE_STANDARD! Rejecting.")
+                    c["selection_rejection_stage"] = "SAFE_SCORED"
+                    c["selection_rejection_reason"] = "not_available_standard"
                     continue
                 if c.get("is_registered", False) or not c.get("registration_available", True):
-                    logger.warning(f"[SAFETY-ASSERTION-REJECT] Candidate {d} is_registered=True! Rejecting.")
+                    c["selection_rejection_stage"] = "SAFE_SCORED"
+                    c["selection_rejection_reason"] = "registered_domain"
                     continue
                 if c.get("is_premium", False) or c.get("premium_status") == "PREMIUM":
-                    logger.warning(f"[SAFETY-ASSERTION-REJECT] Candidate {d} premium_status=PREMIUM! Rejecting.")
+                    c["selection_rejection_stage"] = "SAFE_SCORED"
+                    c["selection_rejection_reason"] = "premium_domain"
                     continue
 
                 safe_scored_candidates.append(c)
 
-            funnel_stats["funnel_rejections"]["availability"] = max(0, int(funnel_stats.get("checked", 0)) - int(funnel_stats.get("available_standard", 0)))
-            funnel_stats["funnel_rejections"]["ip"] = max(0, int(funnel_stats.get("ip_screened", 0)) - int(funnel_stats.get("ip_passed", 0)))
+            funnel_counters["safe_scored"] = len(safe_scored_candidates)
+            funnel_counters["stage9_safe_scored"] = len(safe_scored_candidates)
+            funnel_counters["consensus_input"] = len(safe_scored_candidates)
 
-            # =============================================================
-            # STAGE 9A: consensus + quality floors + learned ranking
-            # Diversity is deliberately AFTER these gates.
-            # =============================================================
+            # 3. CONSENSUS_PASS Gate
             mm_cfg = self.multi_model_evaluator.config
             mm_summary = funnel_stats.get("multi_model_summary", {})
             all_judges_failed = bool(mm_summary.get("roles")) and all(
@@ -1086,33 +1347,46 @@ class DomainHunterPipeline:
                     1 for role in ("linguistic_judge", "brand_judge", "commercial_judge", "red_team_judge")
                     if (c.get(role) or {}).get("status") == "SUCCESS"
                 )
-                deterministic_fallback = all_judges_failed or (evaluated and judge_successes == 0)
+                deterministic_fallback = all_judges_failed or (evaluated and judge_successes == 0) or c.get("deterministic_fallback", False)
                 verdict = str(consensus.get("verdict", "REVIEW")).upper()
                 confidence = float(c.get("consensus_confidence") or consensus.get("confidence") or 0.0)
                 consensus_score = float(consensus.get("consensus_score") or c.get("quality_score", 0.0) or 0.0)
+                
                 if bool(mm_cfg.get("enabled", True)) and not evaluated and not all_judges_failed:
-                    c["selection_rejection_stage"] = "MULTI_MODEL_EVALUATED"
+                    c["selection_rejection_stage"] = "CONSENSUS_PASS"
+                    c["selection_rejection_reason"] = "missing_model_evaluation"
+                    rejection_reasons["missing_model_evaluation"] += 1
                     continue
                 if deterministic_fallback:
                     c["multi_model_fallback"] = "DETERMINISTIC_ONLY"
                     consensus_score = float(c.get("quality_score", 0.0) or 0.0)
                     confidence = min(55.0, float(c.get("quality_score", 0.0) or 0.0))
                 elif evaluated and (verdict == "REJECT" or consensus_score < float(mm_cfg.get("arbiter_review_min_score", 60.0))):
+                    red_score = float(consensus.get("red_team_score") or 70.0)
+                    if red_score < float(mm_cfg.get("red_team_low_score", 55.0)) and consensus.get("kill_reasons"):
+                        rej_key = "red_team"
+                    else:
+                        rej_key = "consensus_rejected"
                     c["selection_rejection_stage"] = "CONSENSUS_PASS"
+                    c["selection_rejection_reason"] = rej_key
+                    rejection_reasons[rej_key] += 1
+                    rejection_reasons["final_judge_rejected"] += 1
                     continue
                 if evaluated and not deterministic_fallback and confidence < float(mm_cfg.get("min_consensus_confidence", 55.0)):
                     c["selection_rejection_stage"] = "CONSENSUS_PASS"
+                    c["selection_rejection_reason"] = "low_confidence"
+                    rejection_reasons["low_confidence"] += 1
                     continue
-                if evaluated and (verdict == "REJECT" or consensus_score < float(mm_cfg.get("arbiter_review_min_score", 60.0))):
-                    c["selection_rejection_stage"] = "CONSENSUS_PASS"
-                    continue
-                if evaluated and confidence < float(mm_cfg.get("min_consensus_confidence", 55.0)):
-                    c["selection_rejection_stage"] = "CONSENSUS_PASS"
-                    continue
+                    
                 consensus_candidates.append(c)
-            funnel_stats["consensus_pass"] = len(consensus_candidates)
-            funnel_stats["funnel_rejections"]["consensus"] = max(0, len(safe_scored_candidates) - len(consensus_candidates))
 
+            funnel_counters["consensus_pass"] = len(consensus_candidates)
+            funnel_counters["stage9_final_judge_approved"] = len(consensus_candidates)
+            funnel_counters["stage9_word_glue_passed"] = len(consensus_candidates)
+            funnel_counters["stage9_quality_threshold_passed"] = len(consensus_candidates)
+            funnel_stats["consensus_pass"] = len(consensus_candidates)
+
+            # 4. QUALITY_FLOOR_PASS Gate
             quality_floor_candidates: List[Dict[str, Any]] = []
             for c in consensus_candidates:
                 qb = c.get("quality_breakdown", {}) or {}
@@ -1122,25 +1396,134 @@ class DomainHunterPipeline:
                 comm = float(fs.get("commercial", c.get("commercial_score", 0.0)) or 0.0)
                 linguistic = float((c.get("consensus") or {}).get("final_linguistic_quality") or (c.get("consensus") or {}).get("linguistic_quality") or pron)
                 quality = float(c.get("quality_score", 0.0) or 0.0)
-                floors_ok = (
-                    quality >= float(mm_cfg.get("final_quality_floor", 68.0))
-                    and brand >= float(mm_cfg.get("final_brand_floor", 60.0))
-                    and comm >= float(mm_cfg.get("final_commercial_floor", 58.0))
-                    and linguistic >= float(mm_cfg.get("final_linguistic_floor", 60.0))
-                )
-                if c.get("short_but_meaningless") or c.get("gibberish_quality_band") == "LIKELY_GIBBERISH":
-                    floors_ok = False
-                if not floors_ok:
+
+                if c.get("short_but_meaningless"):
                     c["selection_rejection_stage"] = "QUALITY_FLOOR_PASS"
+                    c["selection_rejection_reason"] = "short_but_meaningless"
+                    rejection_reasons["short_but_meaningless"] += 1
                     continue
+                if c.get("gibberish_quality_band") == "LIKELY_GIBBERISH":
+                    c["selection_rejection_stage"] = "QUALITY_FLOOR_PASS"
+                    c["selection_rejection_reason"] = "gibberish"
+                    rejection_reasons["gibberish"] += 1
+                    continue
+                if c.get("pronounceable_not_brandable"):
+                    c["selection_rejection_stage"] = "QUALITY_FLOOR_PASS"
+                    c["selection_rejection_reason"] = "short_but_meaningless"
+                    rejection_reasons["short_but_meaningless"] += 1
+                    continue
+                if quality < float(mm_cfg.get("final_quality_floor", 68.0)):
+                    c["selection_rejection_stage"] = "QUALITY_FLOOR_PASS"
+                    c["selection_rejection_reason"] = "quality_floor"
+                    rejection_reasons["quality_floor"] += 1
+                    rejection_reasons["quality_rejected"] += 1
+                    continue
+                if brand < float(mm_cfg.get("final_brand_floor", 60.0)):
+                    c["selection_rejection_stage"] = "QUALITY_FLOOR_PASS"
+                    c["selection_rejection_reason"] = "brand_floor"
+                    rejection_reasons["brand_floor"] += 1
+                    continue
+                if comm < float(mm_cfg.get("final_commercial_floor", 58.0)):
+                    c["selection_rejection_stage"] = "QUALITY_FLOOR_PASS"
+                    c["selection_rejection_reason"] = "commercial_floor"
+                    rejection_reasons["commercial_floor"] += 1
+                    continue
+                if linguistic < float(mm_cfg.get("final_linguistic_floor", 60.0)):
+                    c["selection_rejection_stage"] = "QUALITY_FLOOR_PASS"
+                    c["selection_rejection_reason"] = "linguistic_floor"
+                    rejection_reasons["linguistic_floor"] += 1
+                    continue
+
                 c["quality_floor_components"] = {"quality": quality, "brand": brand, "commercial": comm, "linguistic": linguistic, "pronunciation": pron}
                 quality_floor_candidates.append(c)
-            funnel_stats["quality_floor_pass"] = len(quality_floor_candidates)
-            funnel_stats["funnel_rejections"]["deterministic_quality"] = max(0, len(consensus_candidates) - len(quality_floor_candidates))
 
-            # Phase 4 learning must influence rank BEFORE diversity.
+            funnel_counters["quality_floor_pass"] = len(quality_floor_candidates)
+            funnel_counters["stage9_quality_floor_passed"] = len(quality_floor_candidates)
+            funnel_stats["quality_floor_pass"] = len(quality_floor_candidates)
+
+            # 5. ATOM_VALIDATED Gate (Genuine Atom Appraisal for Final Validation Candidates)
+            atom_cfg = get_atom_config()
+            atom_required = bool(atom_cfg.get("required_for_final", True))
+            min_atom_score = float(atom_cfg.get("min_domain_score", 8.0))
+            
+            # Check Atom connectivity
+            atom_health = await self.atom_service.check_health()
+            atom_connected = (atom_health.status == "CONNECTED")
+            
+            if atom_required and not atom_connected:
+                atom_blocked_msg = (
+                    f"\n============================================================\n"
+                    f"ATOM STATUS:\n"
+                    f"CONFIGURED\n"
+                    f"BUT:\n"
+                    f"NOT CONNECTED\n\n"
+                    f"FINAL BLOCKED:\n"
+                    f"{len(quality_floor_candidates)} candidates waiting for Atom validation\n"
+                    f"============================================================\n"
+                )
+                logger.error(atom_blocked_msg)
+                print(atom_blocked_msg, flush=True)
+                for c in quality_floor_candidates:
+                    c["atom_gate_status"] = "ATOM_UNVALIDATED"
+                    c["selection_rejection_stage"] = "ATOM_VALIDATED"
+                    c["selection_rejection_reason"] = "atom_not_connected"
+                    rejection_reasons["atom_not_connected"] += 1
+                    rejection_reasons["rejected_by_atom"] += 1
+                atom_validated_candidates: List[Dict[str, Any]] = []
+            else:
+                # Appraise any candidates reaching final validation that haven't been appraised yet
+                unappraised_finalists = [
+                    c["domain"] for c in quality_floor_candidates
+                    if not (c.get("atom") and (c["atom"].get("status") == "SUCCESS" or c.get("atom_domain_score") is not None))
+                ]
+                if unappraised_finalists:
+                    logger.info(f"[STAGE 9-ATOM] Genuinely appraising {len(unappraised_finalists)} final validation candidates: {unappraised_finalists}")
+                    finalist_appraisals = await self.atom_service.appraise_batch(unappraised_finalists)
+                    for c in quality_floor_candidates:
+                        d = c["domain"]
+                        if d in finalist_appraisals:
+                            res_item = finalist_appraisals[d]
+                            res_dict = res_item.model_dump() if hasattr(res_item, "model_dump") else (res_item.dict() if hasattr(res_item, "dict") else dict(res_item))
+                            c["atom"] = res_dict
+                            c["atom_domain_score"] = res_item.atom_domain_score
+                            c["atom_appraisal_value"] = res_item.atom_appraisal_value
+                            c["atom_appraisal_normalized"] = res_item.atom_appraisal_normalized
+                            c["atom_status"] = res_item.status
+
+                atom_validated_candidates = []
+                for c in quality_floor_candidates:
+                    atom_data = c.get("atom") or {}
+                    atom_status = atom_data.get("status")
+                    atom_score = atom_data.get("atom_domain_score")
+
+                    if atom_required:
+                        if atom_status != "SUCCESS":
+                            c["selection_rejection_stage"] = "ATOM_VALIDATED"
+                            c["selection_rejection_reason"] = "atom_unvalidated"
+                            c["atom_gate_status"] = "ATOM_UNVALIDATED"
+                            rejection_reasons["atom_unvalidated"] += 1
+                            rejection_reasons["rejected_by_atom"] += 1
+                            continue
+                        if atom_score is None or float(atom_score) < min_atom_score:
+                            c["selection_rejection_stage"] = "ATOM_VALIDATED"
+                            c["selection_rejection_reason"] = "atom_score_too_low"
+                            c["atom_gate_status"] = "ATOM_REJECTED"
+                            rejection_reasons["atom_score_too_low"] += 1
+                            rejection_reasons["rejected_by_atom"] += 1
+                            continue
+                        c["atom_gate_status"] = "ATOM_VALIDATED"
+                    else:
+                        c["atom_gate_status"] = "ATOM_VALIDATED" if atom_status == "SUCCESS" else "ATOM_OPTIONAL"
+
+                    atom_validated_candidates.append(c)
+
+            funnel_counters["atom_validated"] = len(atom_validated_candidates)
+            funnel_stats["atom_validated"] = len(atom_validated_candidates)
+            funnel_stats["atom_pass"] = len(atom_validated_candidates)
+
+            # 6. LEARNING_RANKED Gate & Final Rank Scoring
             learned_score_map: Dict[str, float] = {}
-            for cand in quality_floor_candidates:
+            for cand in atom_validated_candidates:
                 d = cand.get("domain") or cand.get("domain_name", "")
                 l_score, l_status, l_version = self.ranker.predict_preference(cand)
                 if l_score is not None:
@@ -1148,6 +1531,11 @@ class DomainHunterPipeline:
                 cand["learned_preference_score"] = l_score
                 cand["learning_status"] = l_status
                 cand["model_version"] = l_version
+                sel_score = self.quality_tier_engine.compute_selection_score(
+                    cand,
+                    learned_preference_score=l_score
+                )
+                cand["selection_score"] = sel_score
                 consensus = cand.get("consensus") or {}
                 weights = mm_cfg.get("final_rank_weights", {})
                 deterministic_quality = float(cand.get("quality_score", 0.0) or 0.0)
@@ -1156,16 +1544,22 @@ class DomainHunterPipeline:
                 commercial_quality = float(consensus.get("final_commercial_quality") or consensus.get("commercial_quality") or cand.get("commercial_score", 0.0))
                 buyer_quality = float(consensus.get("final_buyer_quality") or consensus.get("buyer_quality") or cand.get("buyer_clarity_score", 0.0))
                 semantic_quality = float(consensus.get("final_semantic_quality") or consensus.get("semantic_quality") or cand.get("quality_breakdown", {}).get("semantic", 0.0))
-                atom = cand.get("atom") or {
-                    "atom_domain_score": cand.get("atom_domain_score"),
-                    "atom_market_signal": cand.get("atom_market_signal"),
-                    "atom_appraisal": cand.get("atom_appraisal"),
-                }
-                atom_signal = atom.get("atom_domain_score", atom.get("atom_market_signal", atom.get("atom_appraisal")))
-                try:
-                    atom_signal = float(atom_signal) if atom_signal is not None else 50.0
-                except (TypeError, ValueError):
-                    atom_signal = 50.0
+
+                atom_signal = cand.get("atom_appraisal_normalized")
+                if atom_signal is None:
+                    atom_signal = (cand.get("atom") or {}).get("atom_domain_score")
+                if atom_signal is None:
+                    if atom_required:
+                        cand["atom_gate_status"] = "ATOM_UNVALIDATED"
+                        atom_signal = 0.0
+                    else:
+                        atom_signal = 50.0
+                else:
+                    try:
+                        atom_signal = float(atom_signal)
+                    except (ValueError, TypeError):
+                        atom_signal = 0.0 if atom_required else 50.0
+
                 learning_signal = float(l_score) * 100.0 if l_score is not None else 50.0
                 pattern = float(cand.get("pattern_diversity_score", 100.0) or 100.0)
                 red_pen = float(consensus.get("red_team_penalty", 0.0) or 0.0)
@@ -1185,27 +1579,85 @@ class DomainHunterPipeline:
                     pattern * float(weights.get("pattern_diversity", 0.06))
                 )
                 final_rank = raw_rank - red_pen - disagreement_pen - min(12.0, invented_pen * 0.35) - max(0.0, (100.0 - pattern) * 0.08)
-                c["final_rank_score"] = round(max(5.0, min(100.0, final_rank)), 3)
-                c["selection_reasons"] = list(c.get("selection_reasons") or []) + [
-                    f"final_rank_score={c['final_rank_score']:.1f}",
-                    f"consensus_confidence={float(c.get('consensus_confidence') or 0):.1f}"
+                cand["final_rank_score"] = round(max(5.0, min(100.0, final_rank)), 3)
+                cand["selection_reasons"] = list(cand.get("selection_reasons") or []) + [
+                    f"final_rank_score={cand['final_rank_score']:.1f}",
+                    f"consensus_confidence={float(cand.get('consensus_confidence') or 0):.1f}"
                 ]
-            funnel_stats["learned_ranked"] = len(quality_floor_candidates)
 
-            # =============================================================
-            # STAGE 9B: bounded diversity selection
-            # =============================================================
-            diversity_input = sorted(quality_floor_candidates, key=lambda c: float(c.get("final_rank_score", 0.0)), reverse=True)
+            funnel_counters["learning_ranked"] = len(atom_validated_candidates)
+            funnel_counters["stage9_learning_ranked"] = len(atom_validated_candidates)
+            funnel_stats["learned_ranked"] = len(atom_validated_candidates)
+
+            # 7. DIVERSITY_INPUT & FINAL SELECTION
+            diversity_input = sorted(
+                atom_validated_candidates,
+                key=lambda c: float(c.get("final_rank_score", c.get("selection_score", 0.0))),
+                reverse=True
+            )
+            funnel_counters["diversity_input"] = len(diversity_input)
+            funnel_counters["stage9_diversity_input"] = len(diversity_input)
             funnel_stats["diversity_input"] = len(diversity_input)
+
             penalized_candidates = self.diversity_engine.apply_diversity_penalties(diversity_input)
             final_selection = self.diversity_engine.select_diverse_candidates(
                 penalized_candidates,
                 limit=min(FINAL_RESULT_COUNT, len(penalized_candidates)),
-                min_quality_threshold=int(float(mm_cfg.get("final_quality_floor", 68.0)))
+                min_quality_threshold=int(float(mm_cfg.get("final_quality_floor", 68.0))),
+                tracking_stats=rejection_reasons
             )
-            funnel_stats["diversity_selected"] = len(final_selection)
-            funnel_stats["funnel_rejections"]["diversity"] = max(0, len(diversity_input) - len(final_selection))
+            selected_domains_set = {c.get("domain") for c in final_selection}
+            for c in diversity_input:
+                if c.get("domain") not in selected_domains_set:
+                    c["selection_rejection_stage"] = "DIVERSITY_SELECTION"
+                    c["selection_rejection_reason"] = "diversity"
+                    rejection_reasons["diversity"] += 1
+
+            funnel_counters["final"] = len(final_selection)
+            funnel_counters["stage9_diversity_selected"] = len(final_selection)
+            funnel_counters["stage9_final_selected"] = len(final_selection)
             funnel_stats["final"] = len(final_selection)
+            funnel_stats["diversity_selected"] = len(final_selection)
+
+            # Stage 9 Diagnostic Funnel Reporting (Section 1)
+            funnel_report_str = (
+                f"\n============================================================\n"
+                f"STAGE 9 DIAGNOSTIC FUNNEL\n"
+                f"============================================================\n"
+                f"AVAILABLE_STANDARD    = {funnel_counters['available_standard']}\n"
+                f"SAFE_SCORED           = {funnel_counters['safe_scored']}\n"
+                f"CONSENSUS_INPUT       = {funnel_counters['consensus_input']}\n"
+                f"CONSENSUS_PASS        = {funnel_counters['consensus_pass']}\n"
+                f"QUALITY_FLOOR_PASS    = {funnel_counters['quality_floor_pass']}\n"
+                f"ATOM_VALIDATED        = {funnel_counters['atom_validated']}\n"
+                f"LEARNING_RANKED       = {funnel_counters['learning_ranked']}\n"
+                f"DIVERSITY_INPUT       = {funnel_counters['diversity_input']}\n"
+                f"FINAL                 = {funnel_counters['final']}\n"
+                f"============================================================\n"
+                f"REJECTION BREAKDOWN:\n"
+                f"  consensus_rejected:         {rejection_reasons['consensus_rejected']}\n"
+                f"  missing_model_evaluation:   {rejection_reasons['missing_model_evaluation']}\n"
+                f"  low_confidence:             {rejection_reasons['low_confidence']}\n"
+                f"  quality_floor:              {rejection_reasons['quality_floor']}\n"
+                f"  brand_floor:                {rejection_reasons['brand_floor']}\n"
+                f"  commercial_floor:           {rejection_reasons['commercial_floor']}\n"
+                f"  linguistic_floor:           {rejection_reasons['linguistic_floor']}\n"
+                f"  gibberish:                  {rejection_reasons['gibberish']}\n"
+                f"  short_but_meaningless:      {rejection_reasons['short_but_meaningless']}\n"
+                f"  red_team:                   {rejection_reasons['red_team']}\n"
+                f"  diversity:                  {rejection_reasons['diversity']}\n"
+                f"  atom_unvalidated:           {rejection_reasons['atom_unvalidated']}\n"
+                f"  atom_score_too_low:         {rejection_reasons['atom_score_too_low']}\n"
+                f"  atom_not_connected:         {rejection_reasons['atom_not_connected']}\n"
+                f"============================================================\n"
+            )
+            logger.info(funnel_report_str)
+            print(funnel_report_str, flush=True)
+
+            funnel_stats["funnel_counters"] = funnel_counters
+            funnel_stats["funnel_rejection_reasons"] = rejection_reasons
+            funnel_stats.update(funnel_counters)
+            funnel_stats.update(rejection_reasons)
             funnel_stats["one_word_funnel"]["final_one_word"] = sum(
                 1 for c in final_selection
                 if c.get("naming_type") in ["ONE_WORD", "REAL_WORD", "REAL_FOREIGN_WORD"] or c.get("generation_strategy") == "ONE_WORD"
@@ -1213,7 +1665,7 @@ class DomainHunterPipeline:
             funnel_stats["one_word_funnel"]["final"] = funnel_stats["one_word_funnel"]["final_one_word"]
             funnel_stats["one_word_final"] = funnel_stats["one_word_funnel"]["final_one_word"]
 
-            # Phase 3 Quality Tiers & Opportunity Explanations
+            # Step 6: Final Tier Assignment & Opportunity Explanations
             tiered_results = self.quality_tier_engine.organize_tiers(
                 final_selection,
                 learned_scores=learned_score_map
@@ -1222,8 +1674,57 @@ class DomainHunterPipeline:
             tier_b = tiered_results["tier_b"]
             watchlist = tiered_results["watchlist"]
 
+            # Enforce Tier A Atom minimum score (8.5) (Part 11)
+            tier_a_min_atom = float(atom_cfg.get("tier_a_min_score", 8.5))
+            if atom_required:
+                demoted_from_tier_a = []
+                retained_tier_a = []
+                for c in tier_a:
+                    atom_sc = float((c.get("atom") or {}).get("atom_domain_score") or 0.0)
+                    if atom_sc < tier_a_min_atom:
+                        c["quality_tier"] = "TIER_B"
+                        tier_b.append(c)
+                        demoted_from_tier_a.append(c)
+                    else:
+                        retained_tier_a.append(c)
+                tier_a = retained_tier_a
+
+            # Attach Complete Audit Trail (Part 36)
             for fd in final_selection:
                 fd["is_final_selected"] = True
+                fd["audit_trail"] = {
+                    "domain": fd.get("domain") or fd.get("domain_name"),
+                    "generation": {
+                        "strategy": fd.get("generation_strategy"),
+                        "concept": fd.get("source_concept"),
+                        "model": fd.get("generator_model"),
+                        "timestamp": fd.get("generation_timestamp", fd.get("checked_at"))
+                    },
+                    "classification": fd.get("naming_type_info") or {"naming_type": fd.get("naming_type")},
+                    "invented_analysis": fd.get("invented_analysis") or {
+                        "subtype": fd.get("invented_subtype"),
+                        "tier": fd.get("invented_quality_tier")
+                    },
+                    "deterministic_quality": {
+                        "quality_score": fd.get("quality_score"),
+                        "overall_score": fd.get("overall_score"),
+                        "brandability": fd.get("brandability_score"),
+                        "breakdown": fd.get("quality_breakdown")
+                    },
+                    "linguistic_judge": fd.get("linguistic_judge") or (fd.get("multi_model_review") or {}).get("linguistic_judge"),
+                    "brand_judge": fd.get("brand_judge") or (fd.get("multi_model_review") or {}).get("brand_judge"),
+                    "commercial_judge": fd.get("commercial_judge") or (fd.get("multi_model_review") or {}).get("commercial_judge"),
+                    "red_team_judge": fd.get("red_team_judge") or (fd.get("multi_model_review") or {}).get("red_team_judge"),
+                    "atom": fd.get("atom"),
+                    "consensus": fd.get("consensus"),
+                    "learning": {
+                        "learned_preference_score": fd.get("learned_preference_score"),
+                        "learning_status": fd.get("learning_status"),
+                        "model_version": fd.get("model_version")
+                    },
+                    "final_rank_score": fd.get("final_rank_score"),
+                    "quality_tier": fd.get("quality_tier")
+                }
 
             # Category Observability & Distribution
             final_cat_counts: Dict[str, int] = {}
@@ -1231,6 +1732,19 @@ class DomainHunterPipeline:
                 c_name = fd.get("market_category", "Unknown")
                 final_cat_counts[c_name] = final_cat_counts.get(c_name, 0) + 1
             funnel_stats["final_category_distribution"] = final_cat_counts
+
+            logger.info(
+                f"[STAGE 9 FUNNEL]\n"
+                f"  SAFE_SCORED: {funnel_counters['stage9_safe_scored']}\n"
+                f"  FINAL_JUDGE_APPROVED: {funnel_counters['stage9_final_judge_approved']}\n"
+                f"  WORD_GLUE_PASSED: {funnel_counters['stage9_word_glue_passed']}\n"
+                f"  QUALITY_FLOOR_PASS: {funnel_counters['stage9_quality_floor_passed']}\n"
+                f"  LEARNING_RANKED: {funnel_counters['stage9_learning_ranked']}\n"
+                f"  DIVERSITY_INPUT: {funnel_counters['stage9_diversity_input']}\n"
+                f"  DIVERSITY_SELECTED: {funnel_counters['stage9_diversity_selected']}\n"
+                f"  FINAL: {funnel_counters['stage9_final_selected']}\n"
+                f"  REJECTIONS: {rejection_reasons}"
+            )
             logger.info(
                 f"[STAGE 9] Final diverse opportunities selected: {len(final_selection)} "
                 f"(Tier A: {len(tier_a)}, Tier B: {len(tier_b)}, Watchlist: {len(watchlist)}). "
@@ -1559,9 +2073,9 @@ class DomainHunterPipeline:
         finally:
             self.is_running = False
 
-def setup_scheduler(router: ModelRouter, http_client, availability_engine: Optional[AvailabilityEngine] = None):
+def setup_scheduler(router: ModelRouter, http_client, availability_engine: Optional[AvailabilityEngine] = None, atom_service: Optional[Any] = None):
     scheduler = AsyncIOScheduler()
-    pipeline = DomainHunterPipeline(router, http_client, availability_engine)
+    pipeline = DomainHunterPipeline(router, http_client, availability_engine, atom_service=atom_service)
 
     enabled = os.getenv("DAILY_HUNT_ENABLED", "true").lower() == "true"
     hour = int(os.getenv("DAILY_HUNT_HOUR", "3"))

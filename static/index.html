@@ -884,8 +884,65 @@
                         </button>
                     </div>
 
+                    <!-- 1. Infrastructure Cards (Atom, Verisign, Cloudflare, Supabase) -->
                     <div class="providers-grid" id="providers-container">
                         <!-- Dynamic provider cards injected here -->
+                    </div>
+
+                    <!-- 2. Capability-Based Task Routing Matrix -->
+                    <div class="routing-matrix-card" id="routing-matrix-section" style="margin-top: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="font-weight: 700; color: #fff; font-size: 0.95rem; display: flex; align-items: center; gap: 0.5rem;">
+                                    <i class="fa-solid fa-diagram-project" style="color: var(--primary);"></i>
+                                    Capability-Based Task Routing Architecture
+                                </div>
+                                <div style="color: var(--text-muted); font-size: 0.78rem; margin-top: 0.2rem;">
+                                    Independent specialized assignments: Primary models with automatic zero-downtime fallback chains
+                                </div>
+                            </div>
+                            <span class="status-pill available" style="font-size: 0.7rem;">CASCADE ARMED</span>
+                        </div>
+                        <div class="routing-matrix-grid" id="capability-routing-grid">
+                            <!-- Dynamic capability routing items injected here -->
+                        </div>
+                    </div>
+
+                    <!-- 3. XKIRO Multi-Model Free AI Pool & Live Telemetry -->
+                    <div class="panel" style="margin-top: 1.5rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+                            <div>
+                                <div style="font-weight: 700; color: #fff; font-size: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                                    <i class="fa-solid fa-layer-group" style="color: var(--secondary);"></i>
+                                    XKIRO Free Model Pool
+                                    <span class="badge" id="pool-count-badge" style="background: rgba(124, 92, 255, 0.2); color: var(--secondary); font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 12px;">57 Models</span>
+                                </div>
+                                <div style="color: var(--text-muted); font-size: 0.78rem; margin-top: 0.2rem;">
+                                    Granular health telemetry, active assigned roles, live latency tracking, and on-demand model diagnostics
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                                <input type="text" class="input-control" id="model-search-input" placeholder="Search models or roles..." style="min-width: 200px; font-size: 0.78rem; padding: 0.35rem 0.65rem;">
+                            </div>
+                        </div>
+
+                        <!-- Family Filter Tabs -->
+                        <div class="family-tabs" id="family-filter-tabs">
+                            <button class="family-tab active" data-family="ALL">All Models</button>
+                            <button class="family-tab" data-family="Qwen">Qwen</button>
+                            <button class="family-tab" data-family="Mistral">Mistral</button>
+                            <button class="family-tab" data-family="Cohere">Cohere</button>
+                            <button class="family-tab" data-family="MiniMax">MiniMax</button>
+                            <button class="family-tab" data-family="DeepSeek">DeepSeek</button>
+                            <button class="family-tab" data-family="Other">Other Pool Models</button>
+                        </div>
+
+                        <!-- Model Pool Cards Grid -->
+                        <div class="model-pool-grid" id="model-pool-grid">
+                            <div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 2rem;">
+                                Loading XKIRO model pool catalog...
+                            </div>
+                        </div>
                     </div>
                 </section>
 
@@ -980,45 +1037,50 @@
                     <span style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);">USPTO + Brand Registry</span>
                 </div>
 
-                <div class="domain-scores-row">
-                    <div class="score-item">
-                        <span class="label">Overall Score</span>
-                        <span class="val" id="modal-score-overall" style="color: var(--success);">-</span>
+                <!-- 1. INTERNAL QUALITY -->
+                <div class="panel" style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 0.75rem; margin-top: 0.5rem;">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: #fff; text-transform: uppercase; margin-bottom: 0.5rem; display: flex; justify-content: space-between;">
+                        <span><i class="fa-solid fa-microscope" style="color: var(--secondary); margin-right: 0.35rem;"></i> Internal Quality Evidence</span>
+                        <span id="modal-score-overall-badge" style="color: var(--success); font-family: var(--font-mono);">Overall: <strong id="modal-score-overall">-</strong></span>
                     </div>
-                    <div class="score-item">
-                        <span class="label">Brandability</span>
-                        <span class="val" id="modal-score-brand">-</span>
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.4rem; font-size: 0.72rem; text-align: center;">
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); padding: 0.35rem; border-radius: 4px;">
+                            <span style="color: var(--text-muted); display: block;">Brandability</span>
+                            <strong id="modal-score-brand" style="color: #fff; font-family: var(--font-mono);">-</strong>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); padding: 0.35rem; border-radius: 4px;">
+                            <span style="color: var(--text-muted); display: block;">Pronunciation</span>
+                            <strong id="modal-score-pron" style="color: #fff; font-family: var(--font-mono);">-</strong>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); padding: 0.35rem; border-radius: 4px;">
+                            <span style="color: var(--text-muted); display: block;">Hear-to-Spell</span>
+                            <strong id="modal-score-h2s" style="color: #fff; font-family: var(--font-mono);">-</strong>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); padding: 0.35rem; border-radius: 4px;">
+                            <span style="color: var(--text-muted); display: block;">Semantic Anchor</span>
+                            <strong id="modal-score-anchor" style="color: #fff; font-family: var(--font-mono);">-</strong>
+                        </div>
                     </div>
-                    <div class="score-item">
-                        <span class="label">Trend Relevance</span>
-                        <span class="val" id="modal-score-trend">-</span>
-                    </div>
-                    <div class="score-item">
-                        <span class="label">Commercial</span>
-                        <span class="val" id="modal-score-comm">-</span>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.4rem; font-size: 0.72rem; text-align: center; margin-top: 0.4rem;">
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); padding: 0.35rem; border-radius: 4px;">
+                            <span style="color: var(--text-muted); display: block;">Commercial</span>
+                            <strong id="modal-score-comm" style="color: #fff; font-family: var(--font-mono);">-</strong>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); padding: 0.35rem; border-radius: 4px;">
+                            <span style="color: var(--text-muted); display: block;">Buyer Breadth</span>
+                            <strong id="modal-score-breadth" style="color: #fff; font-family: var(--font-mono);">-</strong>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); padding: 0.35rem; border-radius: 4px;">
+                            <span style="color: var(--text-muted); display: block;">Invented Quality</span>
+                            <strong id="modal-score-invented" style="color: #fff; font-family: var(--font-mono);">-</strong>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Additional Quality Breakdown -->
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; font-size: 0.75rem; text-align: center;">
-                    <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); padding: 0.4rem; border-radius: 4px;">
-                        <span style="color: var(--text-muted); display: block;">Pronunciation</span>
-                        <strong id="modal-score-pron" style="color: #fff; font-family: var(--font-mono);">-</strong>
-                    </div>
-                    <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); padding: 0.4rem; border-radius: 4px;">
-                        <span style="color: var(--text-muted); display: block;">Memorability</span>
-                        <strong id="modal-score-mem" style="color: #fff; font-family: var(--font-mono);">-</strong>
-                    </div>
-                    <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-subtle); padding: 0.4rem; border-radius: 4px;">
-                        <span style="color: var(--text-muted); display: block;">Simplicity</span>
-                        <strong id="modal-score-simp" style="color: #fff; font-family: var(--font-mono);">-</strong>
-                    </div>
-                </div>
-
-                <!-- Multi-Model Review -->
+                <!-- 2. MULTI-MODEL REVIEW -->
                 <div id="modal-multi-model-review" style="background: rgba(0, 212, 255, 0.05); border: 1px solid rgba(0, 212, 255, 0.18); border-radius: var(--radius-md); padding: 0.85rem; margin-top: 0.6rem;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.55rem;">
-                        <span style="font-size:0.75rem;font-weight:700;color:#fff;text-transform:uppercase;">MULTI-MODEL REVIEW</span>
+                        <span style="font-size:0.75rem;font-weight:700;color:#fff;text-transform:uppercase;"><i class="fa-solid fa-users-gear" style="color:var(--secondary);margin-right:0.35rem;"></i> Multi-Model Review</span>
                         <span id="modal-mm-confidence" style="font-family:var(--font-mono);color:var(--secondary);font-size:0.72rem;">Confidence: -</span>
                     </div>
                     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0.4rem;font-size:0.72rem;text-align:center;">
@@ -1032,6 +1094,49 @@
                         <div><span style="color:var(--text-muted);">Strengths:</span> <span id="modal-mm-strengths">-</span></div>
                         <div style="margin-top:0.3rem;"><span style="color:var(--text-muted);">Weaknesses:</span> <span id="modal-mm-weaknesses">-</span></div>
                         <div style="margin-top:0.3rem;"><span style="color:var(--text-muted);">Red-team objections:</span> <span id="modal-mm-objections">-</span></div>
+                    </div>
+                </div>
+
+                <!-- 3. EXTERNAL MARKET (ATOM DOMAIN APPRAISAL) -->
+                <div id="modal-atom-section" style="background: rgba(16, 185, 129, 0.05); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: var(--radius-md); padding: 0.85rem; margin-top: 0.6rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.55rem;">
+                        <span style="font-size: 0.75rem; font-weight: 700; color: #fff; text-transform: uppercase;">
+                            <i class="fa-solid fa-chart-line" style="color: var(--success); margin-right: 0.35rem;"></i> External Market (Atom Appraisal)
+                        </span>
+                        <span id="modal-atom-badge" class="status-pill available" style="font-size: 0.68rem;">ATOM VALIDATED</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; font-size: 0.75rem; text-align: center;">
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); padding: 0.45rem; border-radius: 4px;">
+                            <span style="color: var(--text-muted); display: block; font-size: 0.68rem;">Atom Domain Score</span>
+                            <strong id="modal-atom-domain-score" style="color: var(--success); font-family: var(--font-mono); font-size: 0.95rem;">-</strong>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); padding: 0.45rem; border-radius: 4px;">
+                            <span style="color: var(--text-muted); display: block; font-size: 0.68rem;">Estimated Value</span>
+                            <strong id="modal-atom-appraisal-val" style="color: var(--secondary); font-family: var(--font-mono); font-size: 0.95rem;">-</strong>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); padding: 0.45rem; border-radius: 4px;">
+                            <span style="color: var(--text-muted); display: block; font-size: 0.68rem;">Normalized Signal</span>
+                            <strong id="modal-atom-norm-val" style="color: #fff; font-family: var(--font-mono); font-size: 0.95rem;">-</strong>
+                        </div>
+                    </div>
+                    <div style="margin-top: 0.6rem; font-size: 0.72rem; display: flex; flex-direction: column; gap: 0.3rem;">
+                        <div><span style="color: var(--success); font-weight: 600;">Positive Signals:</span> <span id="modal-atom-pos-signals">-</span></div>
+                        <div><span style="color: var(--danger); font-weight: 600;">Negative Signals:</span> <span id="modal-atom-neg-signals">-</span></div>
+                    </div>
+                </div>
+
+                <!-- 4. CALIBRATION (INTERNAL VS ATOM) -->
+                <div id="modal-calibration-section" style="background: rgba(124, 92, 255, 0.05); border: 1px solid rgba(124, 92, 255, 0.2); border-radius: var(--radius-md); padding: 0.75rem; margin-top: 0.6rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.45rem;">
+                        <span style="font-size: 0.75rem; font-weight: 700; color: #fff; text-transform: uppercase;">
+                            <i class="fa-solid fa-scale-balanced" style="color: #c084fc; margin-right: 0.35rem;"></i> Calibration Analysis
+                        </span>
+                        <span id="modal-calib-gap" style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--secondary);">Gap: -</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.72rem; gap: 0.5rem; flex-wrap: wrap;">
+                        <div>Internal Score: <strong id="modal-calib-internal-score" style="color: #fff; font-family: var(--font-mono);">-</strong></div>
+                        <div>Atom Scaled: <strong id="modal-calib-atom-score" style="color: var(--success); font-family: var(--font-mono);">-</strong></div>
+                        <div>Flags: <span id="modal-calib-flags" style="font-family: var(--font-mono); color: var(--warning);">-</span></div>
                     </div>
                 </div>
 
@@ -1168,6 +1273,42 @@
                 <button class="btn btn-secondary" id="reject-btn-cancel">Cancel</button>
                 <button class="btn btn-primary" id="reject-btn-confirm" style="background: var(--danger); border-color: var(--danger);">
                     <i class="fa-solid fa-ban"></i> <span>Submit Rejection</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- ATOM PRE-RUN GUARD MODAL                   -->
+    <!-- ========================================== -->
+    <div class="modal-overlay" id="atom-guard-modal" role="dialog" aria-modal="true" aria-labelledby="modal-atom-guard-title">
+        <div class="modal-box" style="max-width: 500px;">
+            <div class="modal-header">
+                <div class="modal-title" id="modal-atom-guard-title">
+                    <i class="fa-solid fa-shield-halved" style="color: var(--warning);"></i>
+                    <span>ATOM VALIDATION REQUIRED</span>
+                </div>
+                <button class="modal-close-btn" id="atom-guard-close-btn" aria-label="Close dialog">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div style="background: rgba(234, 179, 8, 0.08); border: 1px solid rgba(234, 179, 8, 0.25); border-radius: var(--radius-md); padding: 0.85rem; font-size: 0.85rem; line-height: 1.5; color: #fff;">
+                    <strong style="color: var(--warning);"><i class="fa-solid fa-triangle-exclamation"></i> ATOM REQUIRED</strong><br>
+                    Configure Atom API credentials before final opportunities can be published.
+                </div>
+                <p style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 0.75rem; line-height: 1.5;">
+                    The system operates in <strong>quality-first fail-closed mode</strong> (<span style="font-family: var(--font-mono); color: var(--secondary);">ATOM_REQUIRED_FOR_FINAL=true</span>).
+                    Candidates without verified Atom Domain Appraisal cannot appear in Tier A, Tier B, or Final Opportunities.
+                </p>
+                <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.5;">
+                    You can still run the hunt for internal exploratory processing, but the final output will display <em>WAITING FOR ATOM VALIDATION</em> until API credentials are configured in <span style="font-family: var(--font-mono);">.env</span>.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-atom-guard-cancel">Cancel</button>
+                <button class="btn btn-primary" id="btn-atom-guard-proceed">
+                    <i class="fa-solid fa-play"></i> <span>Proceed (Internal Run Only)</span>
                 </button>
             </div>
         </div>

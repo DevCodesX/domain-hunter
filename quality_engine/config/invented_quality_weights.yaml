@@ -60,17 +60,35 @@ tier_a_floors:
   min_commercial_naturalness: 65.0
   min_brandability: 70.0
 
-
 # =========================================================================
-# PHASE QE: Invented generation control, brandability calibration, gates
+# Quality Engineering Phase: Invented & Strategy Calibration Controls
 # =========================================================================
 invented_generation:
   baseline_ratio: 0.14
   max_ratio: 0.18
   exploration_ratio: 0.10
-  anchored_ratio_target: 0.90
   exploration_ratio_max: 0.10
+  anchored_ratio_target: 0.90
   min_strategy_quota: 40
+
+strategy_targets:
+  ONE_WORD: 350
+  COMPOUND: 350
+  SEMANTIC: 350
+  INVENTED: 270
+  PREFIX_SUFFIX: 210
+  TREND: 210
+  KEYWORD_BRANDABLE: 210
+
+strategy_quotas:
+  ONE_WORD: 350
+  COMPOUND: 350
+  SEMANTIC: 350
+  INVENTED: 270
+  PREFIX_SUFFIX: 210
+  TREND: 210
+  KEYWORD_BRANDABLE: 210
+  target_total: 1950
 
 invented_brandability:
   anchor_factor_strong: 1.00
@@ -78,27 +96,79 @@ invented_brandability:
   anchor_factor_weak: 0.72
   anchor_factor_unanchored: 0.58
 
-invented_final_gates:
-  tier_a_requires: STRONG
-  tier_b_requires: MODERATE
-  weak_action: WATCHLIST
-  unanchored_action: WATCHLIST
-  extremely_weak_action: REJECT
-
 commercial_calibration:
-  invented_neutral_baseline: 52.0
+  invented_neutral_baseline: 48.0
+  short_length_max_bonus: 6.0
   length_bonus_cap: 8.0
 
 trend_calibration:
-  invented_unanchored_cap: 45.0
+  invented_unanchored_cap: 40.0
   invented_weak_cap: 55.0
 
-strategy_quotas:
-  ONE_WORD: 300
-  INVENTED: 280
-  SEMANTIC: 350
-  COMPOUND: 300
-  PREFIX_SUFFIX: 200
-  TREND: 200
-  KEYWORD_BRANDABLE: 200
-  target_total: 1830
+invented_final_gates:
+  tier_a_requires: "STRONG"
+  tier_b_requires: "MODERATE"
+  weak_action: "WATCHLIST"
+  unanchored_action: "WATCHLIST"
+  extremely_weak_action: "REJECT"
+
+# =========================================================================
+# QUALITY CEILINGS (NO HIGH SCORE WITHOUT EVIDENCE)
+# =========================================================================
+quality_ceilings:
+  UNANCHORED:
+    max_brandability: 68.0
+    max_commercial_score: 55.0
+    max_semantic_relevance: 38.0
+    max_trend_score: 40.0
+    max_overall_quality: 58.0
+    max_selection_score: 58.0
+    allowed_tiers: ["WATCHLIST"]
+  WEAK:
+    max_brandability: 74.0
+    max_commercial_score: 65.0
+    max_semantic_relevance: 50.0
+    max_trend_score: 50.0
+    max_overall_quality: 66.0
+    max_selection_score: 66.0
+    allowed_tiers: ["TIER_B", "WATCHLIST"]
+  MODERATE:
+    max_brandability: 84.0
+    max_commercial_score: 80.0
+    max_semantic_relevance: 75.0
+    max_trend_score: 75.0
+    max_overall_quality: 80.0
+    max_selection_score: 80.0
+    allowed_tiers: ["TIER_B", "WATCHLIST"]
+  STRONG:
+    max_brandability: 98.0
+    max_commercial_score: 98.0
+    max_semantic_relevance: 98.0
+    max_trend_score: 98.0
+    max_overall_quality: 98.0
+    max_selection_score: 98.0
+    allowed_tiers: ["TIER_A", "TIER_B", "WATCHLIST"]
+
+compound_quality:
+  contradictory_modifiers:
+    - "low"
+    - "down"
+    - "less"
+    - "off"
+    - "sub"
+    - "under"
+    - "slow"
+    - "cold"
+    - "dull"
+    - "drop"
+    - "lost"
+    - "late"
+    - "zero"
+    - "nil"
+    - "void"
+    - "bad"
+    - "pale"
+  contradictory_penalty: 36.0
+  max_contradictory_naturalness: 45.0
+  max_contradictory_commercial: 50.0
+  max_contradictory_overall: 60.0

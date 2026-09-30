@@ -50,7 +50,7 @@ REAL_3_LETTER_WORDS = {
     "get", "has", "had", "hit", "hop", "hug", "jam", "jog", "jot", "lay", "led", "let",
     "lie", "lit", "met", "mix", "nod", "opt", "owe", "own", "peg", "pop", "put", "ran",
     "rid", "rip", "rob", "rot", "rub", "saw", "say", "see", "sew", "sit", "tap", "try",
-    "tug", "use", "vow", "war", "wed", "wet", "win", "won", "zap", "zip", "raw"
+    "tug", "use", "vow", "war", "wed", "wet", "win", "won", "zap", "zip", "raw", "low"
 }
 
 
@@ -77,10 +77,11 @@ class OneWordQualityEngine:
         if WORDFREQ_AVAILABLE:
             z = zipf_frequency(w, "en")
             if len(w) == 3:
-                # 3-letter words must be in curated English lexicon and have high usage
-                if w in REAL_3_LETTER_WORDS and z >= 3.6:
+                # 3-letter words must be in curated English lexicon or have high usage
+                if (w in REAL_3_LETTER_WORDS or z >= 4.2) and z >= 3.6:
                     return True, z
                 return False, z
+
             else:
                 # 4+ letter words require Zipf >= 3.2 for authentic dictionary standing
                 if z >= 3.2:

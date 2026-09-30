@@ -99,20 +99,22 @@ class MorphologyClassifier:
                         "details": f"Affix combination ({c1} + {c2})"
                     }
 
-        # 3b. Direct dictionary compound split (e.g. data+dog, iron+clad)
+        # 3b. Direct dictionary compound split (e.g. core+low, data+dog, iron+clad)
         if len(label) >= 6:
+            functional_prefixes = {"get", "try", "use", "my", "go", "the", "sdk", "api"}
+            functional_suffixes = {"ly", "fy", "io", "ia", "hq", "labs", "lab", "corp", "ware", "port", "sys"}
             for split_idx in range(3, len(label) - 2):
                 w1 = label[:split_idx]
                 w2 = label[split_idx:]
                 is_w1, _ = self.one_word_engine.is_dictionary_word(w1)
                 is_w2, _ = self.one_word_engine.is_dictionary_word(w2)
                 if is_w1 and is_w2:
-                    if w1 in self.AFFIX_LIST or w2 in self.AFFIX_LIST:
+                    if w1 in functional_prefixes or w2 in functional_suffixes:
                         return {
                             "morphology": "PREFIX_SUFFIX",
                             "confidence": 0.88,
                             "components": [w1, w2],
-                            "details": f"Affix combination ({w1} + {w2})"
+                            "details": f"Functional affix combination ({w1} + {w2})"
                         }
                     return {
                         "morphology": "COMPOUND",
@@ -120,6 +122,7 @@ class MorphologyClassifier:
                         "components": [w1, w2],
                         "details": f"Direct dictionary compound ({w1} + {w2})"
                     }
+
 
         # 4. Check for known affix prefix/suffix
         for affix in sorted(self.AFFIX_LIST, key=len, reverse=True):

@@ -383,9 +383,12 @@ class InventedQualityEvaluator:
             w_syl = self.feature_extractor.count_syllables(w)
             if abs(w_syl - cand_syl) > 1 or abs(len(w) - clean_len) > 2:
                 continue
+            # If syllable counts differ, length difference must be <= 1 to be a genuine phonetic cousin
+            if abs(w_syl - cand_syl) >= 1 and abs(len(w) - clean_len) >= 2:
+                continue
 
-            # 3. Homophone distance constraint: phonetic cousins must have edit distance <= 3
-            if levenshtein_distance(clean, w) > 3:
+            # 3. Homophone distance constraint: phonetic cousins must have edit distance <= 2
+            if levenshtein_distance(clean, w) > 2:
                 continue
 
             # 4. Phonetic similarity calculation reusing PhoneticEngine
@@ -436,6 +439,9 @@ class InventedQualityEvaluator:
         TASK A.3: Semantic anchor score.
         Checks if closest anchor carries commercial/semantic meaning or is accidental match.
         Uses wordfreq frequency and commercial root status.
+        CRITICAL RULE: A phonetic match can ONLY serve as a semantic anchor if there is
+        genuine morphological root sharing (shared prefix >= 3 chars or high lexical similarity >= 0.75).
+        Accidental consonant skeleton collisions (e.g. 'horede' -> 'hard') are disqualified.
         """
         seen_words: Set[str] = set()
         eligible_candidates: List[Dict[str, Any]] = []
@@ -454,13 +460,21 @@ class InventedQualityEvaluator:
         for pa in phonetic_anchors:
             w = pa["word"]
             if w not in seen_words and pa["phonetic_similarity"] >= 80.0:
-                seen_words.add(w)
-                eligible_candidates.append({
-                    "word": w,
-                    "closeness": pa["phonetic_similarity"] / 100.0,
-                    "distance": 1 if pa["phonetic_similarity"] >= 90.0 else 2,
-                    "source": "PHONETIC"
-                })
+                # Genuine morphological root check: require shared prefix >= 3 chars or strong lexical similarity
+                common_pfx = 0
+                for ca, cb in zip(label, w):
+                    if ca == cb:
+                        common_pfx += 1
+                    else:
+                        break
+                if common_pfx >= 3 or levenshtein_similarity(label, w) >= 0.75:
+                    seen_words.add(w)
+                    eligible_candidates.append({
+                        "word": w,
+                        "closeness": pa["phonetic_similarity"] / 100.0,
+                        "distance": 1 if pa["phonetic_similarity"] >= 90.0 else 2,
+                        "source": "PHONETIC"
+                    })
 
         if not eligible_candidates:
             return 15.0, [], 0.0
@@ -805,21 +819,6 @@ class InventedQualityEvaluator:
         else:
             subtype = "UNANCHORED"
 
-        # Task E: Composite invented_quality_score
-        w_inv = self.config.get("invented_quality", DEFAULT_CONFIG["invented_quality"])
-        pron_score = brand_subscores["pronunciation_simplicity_score"]
-        dist_score = brand_subscores["distinctiveness_score"]
-
-        inv_composite = (
-            (lex_score * float(w_inv.get("lexical_proximity", 0.25))) +
-            (phon_score * float(w_inv.get("phonetic_proximity", 0.15))) +
-            (sem_score * float(w_inv.get("semantic_anchor", 0.20))) +
-            (brand_score * float(w_inv.get("brandability_heuristic", 0.25))) +
-            (pron_score * float(w_inv.get("pronunciation", 0.10))) +
-            (dist_score * float(w_inv.get("distinctiveness", 0.05)))
-        )
-        invented_quality_score = round(max(5.0, min(99.0, inv_composite)), 2)
-
         # Task F: Soft penalty tiers
         pen_cfg = self.config.get("penalty_tiers", DEFAULT_CONFIG["penalty_tiers"])
         ext_weak_thresh = float(pen_cfg.get("extremely_weak_brandability_threshold", 40.0))
@@ -833,13 +832,29 @@ class InventedQualityEvaluator:
         has_multiple_anchors = total_anchors >= 2
         is_anchor_frequent = anchor_freq >= 3.0
 
-        # STRONG requires robust anchoring (HYBRID or high-semantic/lexical) + multiple anchors + high frequency + high brandability
+        # Authenticity evidence check for STRONG tier:
+        # Requires either an explicit commercial root (e.g. kinetic in kinetoc, vector in vectra)
+        # with prefix match >= 3 chars, OR deep stem sharing (>= 4-character prefix match with high similarity),
+        # AND clean phonotactics without unnatural consonant clusters.
+        has_commercial_anchor = any(
+            (a.get("is_commercial_root") and (label.startswith(a["word"][:3]) or a.get("closeness", 0) >= 85.0))
+            for a in sem_anchors
+        )
+        has_deep_stem = any(
+            (la.get("similarity", 0) >= 78.0 and len(la.get("word", "")) >= 4 and label.startswith(la["word"][:4]))
+            for la in lex_anchors
+        )
+        has_clean_phonotactics = brand_subscores.get("unnatural_cluster_penalty", 0.0) < 15.0
+        has_strong_evidence = (has_commercial_anchor or has_deep_stem) and has_clean_phonotactics
+
+        # STRONG requires robust anchoring (HYBRID or high-semantic/lexical) + multiple anchors + high frequency + high brandability + authentic evidence
         if (
             subtype == "HYBRID_ANCHORED"
             and brand_score >= 68.0
             and has_multiple_anchors
             and is_anchor_frequent
             and sem_score >= 65.0
+            and has_strong_evidence
         ):
             tier = "STRONG"
             penalty = strong_pen
@@ -849,6 +864,7 @@ class InventedQualityEvaluator:
             and has_multiple_anchors
             and is_anchor_frequent
             and sem_score >= 70.0
+            and has_strong_evidence
         ):
             tier = "STRONG"
             penalty = strong_pen
@@ -862,6 +878,49 @@ class InventedQualityEvaluator:
             tier = "EXTREMELY_WEAK"
             penalty = ext_weak_pen
 
+        # Task J: Anchor-Adjusted Brandability Calibration (Part J)
+        # Prevents short random strings from receiving inflated 85-98 brand scores
+        brand_cfg = self.config.get("invented_brandability", DEFAULT_CONFIG.get("invented_brandability", {}))
+        if tier == "STRONG":
+            anchor_factor = float(brand_cfg.get("anchor_factor_strong", 1.00))
+        elif tier == "MODERATE" or subtype in ["LEXICAL_ANCHORED", "SEMANTIC_ANCHORED", "PHONETIC_ANCHORED"]:
+            anchor_factor = float(brand_cfg.get("anchor_factor_moderate", 0.88))
+        elif tier == "WEAK":
+            anchor_factor = float(brand_cfg.get("anchor_factor_weak", 0.72))
+        else:
+            anchor_factor = float(brand_cfg.get("anchor_factor_unanchored", 0.58))
+
+        raw_brand_score = round(float(brand_score), 2)
+        # Unanchored candidates without any recognized root cannot have raw brand score above 74.0
+        if subtype == "UNANCHORED":
+            raw_brand_score = min(74.0, raw_brand_score)
+
+        anchor_adjusted_brand_score = round(max(5.0, min(99.0, raw_brand_score * anchor_factor)), 2)
+
+        # Enforce Quality Ceilings on brandability
+        from quality_engine.config import get_quality_ceilings_config
+        ceilings = get_quality_ceilings_config()
+        ceil_key = tier if tier in ceilings else (subtype if subtype in ceilings else "UNANCHORED")
+        max_brand_ceiling = float(ceilings.get(ceil_key, {}).get("max_brandability", 98.0))
+        anchor_adjusted_brand_score = min(anchor_adjusted_brand_score, max_brand_ceiling)
+
+        # Task E: Composite invented_quality_score (using calibrated brandability)
+        w_inv = self.config.get("invented_quality", DEFAULT_CONFIG["invented_quality"])
+        pron_score = brand_subscores["pronunciation_simplicity_score"]
+        dist_score = brand_subscores["distinctiveness_score"]
+
+        inv_composite = (
+            (lex_score * float(w_inv.get("lexical_proximity", 0.25))) +
+            (phon_score * float(w_inv.get("phonetic_proximity", 0.15))) +
+            (sem_score * float(w_inv.get("semantic_anchor", 0.20))) +
+            (anchor_adjusted_brand_score * float(w_inv.get("brandability_heuristic", 0.25))) +
+            (pron_score * float(w_inv.get("pronunciation", 0.10))) +
+            (dist_score * float(w_inv.get("distinctiveness", 0.05)))
+        )
+        invented_quality_score = round(max(5.0, min(99.0, inv_composite)), 2)
+        max_overall_ceiling = float(ceilings.get(ceil_key, {}).get("max_overall_quality", 98.0))
+        invented_quality_score = min(invented_quality_score, max_overall_ceiling)
+
         return {
             "domain": f"{label}.com",
             "label": label,
@@ -872,13 +931,17 @@ class InventedQualityEvaluator:
             "semantic_anchor_score": sem_score,
             "semantic_anchors": sem_anchors,
             "anchor_frequency": anchor_freq,
-            "brandability_heuristic_score": brand_score,
+            "raw_brandability_heuristic_score": raw_brand_score,
+            "anchor_adjusted_brandability_score": anchor_adjusted_brand_score,
+            "brandability_anchor_factor": anchor_factor,
+            "brandability_heuristic_score": anchor_adjusted_brand_score,  # Calibrated score for backward compat
             "brandability_subscores": brand_subscores,
             "invented_subtype": subtype,
             "invented_quality_tier": tier,
             "invented_quality_score": invented_quality_score,
             "invented_penalty": penalty
         }
+
 
 
 # =========================================================================
@@ -922,3 +985,51 @@ def get_tier_a_floors_config() -> Dict[str, Any]:
     """Loads tier_a_floors settings from config."""
     cfg = load_invented_quality_config()
     return cfg.get("tier_a_floors", DEFAULT_CONFIG["tier_a_floors"])
+
+
+def calculate_invented_semantic_relevance(
+    invented_eval: Dict[str, Any],
+    concept: str = "",
+    market_category: str = "AI & Technology"
+) -> float:
+    """
+    Computes transparent, evidence-based semantic relevance for INVENTED candidates (Part K):
+    - UNANCHORED: low semantic relevance (25.0 - 45.0) unless strong concept evidence exists
+    - ANCHORED: semantic relevance grows with anchor quality and concept fit (50.0 - 75.0)
+    - STRONG / HYBRID: can reach high semantic relevance (72.0 - 92.0)
+    Eliminates arbitrary default 78.0 for unanchored strings.
+    """
+    subtype = invented_eval.get("invented_subtype", "UNANCHORED")
+    tier = invented_eval.get("invented_quality_tier", "WEAK")
+    sem_score = float(invented_eval.get("semantic_anchor_score", 0.0) or 0.0)
+    lex_score = float(invented_eval.get("lexical_proximity_score", 0.0) or 0.0)
+    label = (invented_eval.get("label") or invented_eval.get("domain", "")).lower().replace(".com", "").strip()
+
+    # Check for direct concept word overlap
+    concept_tokens = [w.lower() for w in re.findall(r'[a-zA-Z]{3,}', concept)]
+    has_concept_overlap = any(tok in label or (len(tok) >= 4 and label in tok) for tok in concept_tokens) if concept_tokens else False
+
+    if subtype == "UNANCHORED" or tier == "EXTREMELY_WEAK":
+        # Base low range for unanchored: 25.0 - 45.0
+        base = 28.0 + (sem_score * 0.10)
+        if has_concept_overlap:
+            base += 14.0
+        return round(min(45.0, max(15.0, base)), 3)
+    elif tier == "STRONG" or subtype == "HYBRID_ANCHORED":
+        # Strong/Hybrid: 72.0 - 92.0 based on anchor quality
+        base = 72.0 + (sem_score * 0.15) + (lex_score * 0.08)
+        if has_concept_overlap:
+            base += 6.0
+        return round(min(94.0, max(65.0, base)), 3)
+    elif subtype in ["SEMANTIC_ANCHORED", "LEXICAL_ANCHORED"]:
+        # Anchored: 52.0 - 75.0
+        base = 52.0 + (sem_score * 0.18) + (lex_score * 0.10)
+        if has_concept_overlap:
+            base += 5.0
+        return round(min(78.0, max(45.0, base)), 3)
+    else:  # PHONETIC_ANCHORED or MODERATE
+        base = 45.0 + (sem_score * 0.15)
+        if has_concept_overlap:
+            base += 5.0
+        return round(min(68.0, max(35.0, base)), 3)
+

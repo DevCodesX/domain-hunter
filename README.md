@@ -175,6 +175,89 @@ CREATE TABLE IF NOT EXISTS feedback (
 
 ---
 
+## 🏛️ Multi-Model + Adversarial + Atom Appraisal Consensus Architecture (Phase 5)
+
+Domain Hunter eliminates score inflation on weak invented names through a multi-model consensus system coupled with authoritative external market intelligence from **Atom Domain Appraisal**:
+
+```mermaid
+graph TD
+    subgraph Generation & Verification
+        Gen[1,800+ Generated Candidates] --> Struct[Structural Validation & Deduplication]
+        Struct --> PreAvail[Pre-Availability Ranking]
+        PreAvail --> RDAP[Verisign RDAP Verification]
+        RDAP --> AvailStd[AVAILABLE_STANDARD Gate]
+        AvailStd --> PremIP[Premium & IP Clearance]
+    end
+
+    subgraph Deep Evaluation Cascade
+        PremIP --> TopPool[Top 40-50 Serious Candidates]
+        TopPool --> Judges[4 Independent Expert Judges]
+        Judges --> J1[1. Linguistic Judge: Naturalness, Phonotactics, Coined Intentionality]
+        Judges --> J2[2. Brand Judge: Authentic Brand Feeling, Startup Plausibility]
+        Judges --> J3[3. Commercial Judge: Explicit Buyer Logic, Vertical Applicability]
+        Judges --> J4[4. Adversarial Red Team: Gibberish, Typos, Commercial Weakness]
+        
+        J1 & J2 & J3 & J4 --> DivSelect[Diversified Atom Selection: 7 Strategy Buckets]
+        DivSelect --> AtomAPI[Atom Domain Appraisal Official API]
+        AtomAPI --> Arbiter[Consensus Arbiter: Robust Median, Disagreement Penalty, Gap Calibration]
+    end
+
+    subgraph Hard Gates & Final Publication
+        Arbiter --> Gates[Hard Quality Floors & Atom Hard Gate]
+        Gates -->|Atom < 8.0 or Unvalidated| Reject[ATOM_REJECTED / ATOM_UNVALIDATED]
+        Gates -->|Passes All Hard Floors| LearnScore[Learning Ranker Preference Score]
+        LearnScore --> FinalRank[final_rank_score Calculation]
+        FinalRank --> Diversity[Diversity & Acoustic Clustering Optimization]
+        Diversity --> TierEngine[Quality Tier Engine: Tier A / Tier B]
+        TierEngine --> FinalPub[Final Opportunities Dashboard]
+    end
+```
+
+### 1. Four Independent Expert Judges
+Each expert evaluates candidates with specialized system prompts and distinct model families:
+1. **Linguistic Judge**: Native English naturalness, pronunciation, spelling predictability, hear-to-spell, syllable rhythm, semantic anchors, coined-word intentionality vs. random pronounceable strings.
+2. **Brand Judge**: Authentic brand feeling, memorability, verbal/visual identity, startup plausibility, distinctiveness, category flexibility.
+3. **Commercial Judge**: Explicit buyer logic ("Who realistically buys this?"), buyer breadth, enterprise fit, product flexibility, resale viability.
+4. **Adversarial Red-Team Judge**: Dedicated to challenging and attempting to reject candidates. Uncovers gibberish risks, awkward sound clusters, typosquatting traps, hidden vulgarity, synthetic AI feel, and weak buyer logic.
+
+### 2. Consensus Arbiter & Robust Statistics
+- **Model Independence**: Judges evaluate independently without seeing peer scores.
+- **Robust Median Aggregation**: Eliminates distortion from single model outliers (`scores = [92, 90, 89, 45]` yields a robust median of `89.5` rather than a degraded average).
+- **Disagreement Penalty**: Significant variance between expert judges automatically triggers disagreement flags and reduces confidence.
+- **Standalone Detectors**:
+  - `SHORT_BUT_MEANINGLESS`: Flags short domains that have decent phonetics but lack semantic roots and commercial anchors.
+  - `PRONOUNCEABLE_NOT_BRANDABLE`: Catches phonetically fluent but commercially empty coinages.
+
+### 3. Atom Domain Appraisal Integration
+- **Official API Endpoint**: `GET https://www.atom.com/api/marketplace/domain-appraisal?domain=<DOMAIN>`
+- **Mandatory Quality Gate (`ATOM_REQUIRED_FOR_FINAL=true`)**: Candidates **cannot** appear in Tier A, Tier B, or Final Opportunities without an authoritative Atom appraisal. Unvalidated candidates remain blocked (`ATOM_UNVALIDATED`).
+- **Configurable Operating Thresholds**:
+  - `ATOM_MIN_DOMAIN_SCORE=8.0` (Candidates below 8.0/10 are marked `ATOM_REJECTED` and blocked from final publication).
+  - `ATOM_TIER_A_MIN_DOMAIN_SCORE=8.5` (Tier A requires an independent Atom score ≥ 8.5/10).
+- **Diversified Pre-Selection Pool**: Candidate appraisal budget (default 10–25) is proportionally allocated across 7 distinct strategies (`REAL_WORD`, `COMPOUND`, `SEMANTIC`, `STRONG_INVENTED`, `MODERATE_INVENTED`, `PREFIX_SUFFIX`, `OTHER`) to prevent invented names from monopolizing API calls.
+- **24-Hour Disk Cache**: Persisted in `data/atom_appraisal_cache.json` with TTL validation to eliminate redundant requests.
+- **Normalized Valuation Signal**: Logarithmic monotonic mapping `normalize_atom_appraisal(value)` prevents large dollar amounts from overwhelming ranking.
+- **Internal / External Calibration**: Tracks `internal_atom_gap` and generates diagnostic calibration flags (`INTERNAL_OVERVALUATION_RISK`, `ATOM_ALIGNMENT_STRONG`, `ATOM_ALIGNMENT_WEAK`).
+
+### 4. Invented Name Policy & Quality Ceilings
+Invented names are strictly classified into 5 evidence tiers:
+- **`STRONG_ANCHORED`**: Recognizable roots, high brandability; eligible for Tier A with Atom ≥ 8.5.
+- **`MODERATE_ANCHORED`**: Eligible for Tier B.
+- **`WEAK_ANCHORED`**: Gated to Watchlist / Review.
+- **`UNANCHORED`**: Strict quality ceilings applied; cannot exceed configurable brand confidence and cannot enter Tier A.
+- **`EXTREMELY_WEAK`**: Unconditionally excluded from Tier A and Tier B.
+
+### 5. Fail-Closed Final Publication Contract
+Domain Hunter enforces **fail-closed** publication:
+- Atom unavailable / timeout / unvalidated → **No final publication**.
+- IP risk unverified or critical → **No final publication**.
+- RDAP unverified → **No final publication**.
+- Red-Team critical objection → **No final publication**.
+- Quality floor failure → **No final publication**.
+Thresholds are **never lowered** to meet an artificial quota.
+
+---
+
 ## 🔄 The 11-Stage Pipeline
 
 | Stage | Name | Key Operations |
@@ -292,7 +375,18 @@ OPENROUTER_API_KEY="" # Optional fallback
 # Domain Marketplace & Registrars
 GODADDY_API_KEY="your_godaddy_reseller_key"
 GODADDY_API_SECRET="your_godaddy_reseller_secret"
-ATOM_API_KEY="your_atom_token" # Optional
+
+# Atom Domain Appraisal (Mandatory Quality Gate)
+ATOM_ENABLED="true"
+ATOM_API_TOKEN="your_atom_api_token"
+ATOM_USER_ID="your_atom_user_id"
+ATOM_REQUIRED_FOR_FINAL="true"          # Blocks candidates from Tier A/B unless Atom appraisal succeeds
+ATOM_MIN_DOMAIN_SCORE="8.0"              # Minimum Atom domain score required to pass gate
+ATOM_TIER_A_MIN_DOMAIN_SCORE="8.5"       # Minimum Atom domain score for Tier A consideration
+ATOM_REVIEW_RANGE_MIN="7.0"              # Review threshold for borderline candidates
+ATOM_MAX_APPRAISALS_PER_RUN="15"         # Quota-aware candidate appraisal budget per run
+ATOM_CACHE_TTL_HOURS="24"                # 24-hour disk cache TTL in data/atom_appraisal_cache.json
+ATOM_RANK_WEIGHT="0.12"
 
 # Cloud Persistence
 SUPABASE_URL="https://your-project.supabase.co"

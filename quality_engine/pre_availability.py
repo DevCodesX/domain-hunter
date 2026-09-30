@@ -207,9 +207,25 @@ def rank_and_stratify_candidates(
         else:
             buckets["multilingual_other"].append(c)
 
-    # 3. Sort each bucket by pre_availability_score descending
+    # 3. Sort and interleave categories in each bucket so no single category dominates the top of the queue
     for k in buckets:
-        buckets[k].sort(key=lambda x: x.get("pre_availability_score", 0.0), reverse=True)
+        cat_map: Dict[str, List[Dict[str, Any]]] = {}
+        for item in buckets[k]:
+            c_name = item.get("market_category") or item.get("category") or "OTHER"
+            cat_map.setdefault(c_name, []).append(item)
+        for cat_list in cat_map.values():
+            cat_list.sort(key=lambda x: x.get("pre_availability_score", 0.0), reverse=True)
+        interleaved: List[Dict[str, Any]] = []
+        while any(cat_map.values()):
+            sorted_cats = sorted(
+                [c for c in cat_map.keys() if cat_map[c]],
+                key=lambda c: cat_map[c][0].get("pre_availability_score", 0.0),
+                reverse=True
+            )
+            for c in sorted_cats:
+                if cat_map[c]:
+                    interleaved.append(cat_map[c].pop(0))
+        buckets[k] = interleaved
 
     # 4. Proportional round-robin interleaving
     # Normalize quota proportions to a block of 20 slots

@@ -250,7 +250,9 @@ def test_frontend_only_displays_verified():
                     "availability_status": "AVAILABLE_STANDARD",
                     "is_registered": False,
                     "is_premium": False,
-                    "registration_available": True
+                    "registration_available": True,
+                    "atom_status": "SUCCESS",
+                    "atom_domain_score": 8.8
                 },
                 {
                     "domain": "badpremium.com",
@@ -299,7 +301,9 @@ def test_last_successful_results_preserved_on_failure():
                     "domain_name": "preservedsavedbrand.com",
                     "availability_status": "AVAILABLE_STANDARD",
                     "is_registered": False,
-                    "is_premium": False
+                    "is_premium": False,
+                    "atom_status": "SUCCESS",
+                    "atom_domain_score": 8.8
                 }
             ]
         },

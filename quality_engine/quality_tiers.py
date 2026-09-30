@@ -93,6 +93,134 @@ class QualityTierEngine:
         return round(max(10.0, min(100.0, final_opp)), 2)
 
     @classmethod
+    def compute_selection_score(
+        cls,
+        candidate: Dict[str, Any],
+        learned_preference_score: Optional[float] = None
+    ) -> float:
+        """
+        Computes composite selection_score (0.0 to 100.0) before diversity selection (Part R):
+        selection_score =
+            calibrated_quality
+            + commercial quality
+            + buyer breadth / clarity
+            + semantic quality
+            + learned preference
+            - weak invented penalty
+            - word glue / pattern penalty
+
+        Materially depends on invented_quality_tier and anchor-adjusted brandability.
+        """
+        q_break = candidate.get("quality_breakdown", {})
+        f_scores = q_break.get("_float_scores", {}) if isinstance(q_break, dict) else {}
+
+        quality = float(candidate.get("quality_score", 70.0))
+        brand = float(candidate.get("anchor_adjusted_brandability_score", f_scores.get("brandability", candidate.get("brandability_score", 70.0))))
+        commercial = float(f_scores.get("commercial", candidate.get("commercial_score", 70.0)))
+        buyer_clarity = float(candidate.get("buyer_clarity_score", 70.0))
+        startup_nat = float(candidate.get("startup_naturalness_score", 70.0))
+        semantic = float(f_scores.get("semantic", candidate.get("semantic_relevance_score", candidate.get("semantic_score", 70.0))))
+        pronunciation = float(f_scores.get("pronunciation", 70.0))
+
+        # Core deterministic base (0 - 100)
+        base_score = (
+            (quality * 0.22) +
+            (brand * 0.16) +
+            (commercial * 0.16) +
+            (buyer_clarity * 0.12) +
+            (semantic * 0.12) +
+            (startup_nat * 0.10) +
+            (pronunciation * 0.12)
+        )
+
+        # Invented tier adjustments & weak invented penalty
+        morph = candidate.get("morphology_type") or candidate.get("naming_type")
+        inv_tier = candidate.get("invented_quality_tier")
+        inv_subtype = candidate.get("invented_subtype")
+        inv_adj = 0.0
+
+        if morph == "INVENTED" or inv_tier is not None:
+            if inv_tier == "STRONG" or inv_subtype == "HYBRID_ANCHORED":
+                inv_adj += 3.0  # Anchor reward
+            elif inv_tier == "MODERATE" or inv_subtype in ["LEXICAL_ANCHORED", "SEMANTIC_ANCHORED"]:
+                inv_adj += 0.0  # Neutral
+            elif inv_tier == "WEAK":
+                inv_adj -= 8.0  # Weak invented penalty
+            elif inv_subtype == "UNANCHORED" or inv_tier == "UNANCHORED":
+                inv_adj -= 10.0 # Unanchored penalty
+            elif inv_tier == "EXTREMELY_WEAK":
+                inv_adj -= 25.0 # Severe gibberish penalty
+
+        # Word-glue penalty
+        glue_pen = float(candidate.get("word_glue_penalty", 0.0)) * 0.5
+
+        deterministic_selection = base_score + inv_adj - glue_pen
+
+        # Blend learned preference if present (Cold start safe)
+        if learned_preference_score is not None:
+            # 75% deterministic quality, 25% learned preference
+            final_sel = (deterministic_selection * 0.75) + (float(learned_preference_score) * 0.25)
+        else:
+            final_sel = deterministic_selection
+
+        # Enforce quality ceilings on selection score
+        if inv_tier == "EXTREMELY_WEAK" or inv_subtype == "UNANCHORED" or inv_tier == "UNANCHORED":
+            final_sel = min(final_sel, 58.0)
+        elif inv_tier == "WEAK":
+            final_sel = min(final_sel, 66.0)
+        elif inv_tier == "MODERATE":
+            final_sel = min(final_sel, 80.0)
+
+        is_glue = candidate.get("is_word_glue") or q_break.get("word_glue_penalty", 0) > 30
+        glue_type = candidate.get("glue_type") or q_break.get("glue_type")
+        if is_glue and glue_type == "CONTRADICTORY_MODIFIER_GLUE":
+            final_sel = min(final_sel, 55.0)
+
+        return round(max(10.0, min(100.0, final_sel)), 2)
+
+    @classmethod
+    def check_quality_floors(cls, candidate: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """
+        Evaluates whether candidate meets quality floors for final opportunity consideration (Part S & T).
+        Returns (passes, failure_reasons).
+        """
+        reasons = []
+        q_break = candidate.get("quality_breakdown", {})
+        f_scores = q_break.get("_float_scores", {}) if isinstance(q_break, dict) else {}
+
+        # 1. Fatal unpronounceable or spelling breakdown
+        pron = float(f_scores.get("pronunciation", candidate.get("pronunciation_score", 70.0)))
+        hear = float(candidate.get("hear_to_spell_score", 70.0))
+        if pron < 50.0:
+            reasons.append(f"Pronunciation below minimum floor ({pron:.1f} < 50.0)")
+        if hear < 45.0:
+            reasons.append(f"Hear-to-spell below minimum floor ({hear:.1f} < 45.0)")
+
+        # 2. Hard gate: EXTREMELY_WEAK invented strings and unanchored floors
+        inv_tier = candidate.get("invented_quality_tier")
+        inv_subtype = candidate.get("invented_subtype")
+        brand_score = float(candidate.get("brandability_heuristic_score", 70.0) or 70.0)
+        morph = candidate.get("morphology_type") or candidate.get("naming_type")
+        if morph == "INVENTED" or inv_tier is not None:
+            if inv_tier == "EXTREMELY_WEAK" or (inv_subtype == "UNANCHORED" and brand_score < 40.0):
+                reasons.append("EXTREMELY_WEAK unanchored invented string rejected from final pool")
+            elif (inv_tier == "WEAK" or inv_subtype == "UNANCHORED") and (q_score < 66.0 or brand_score < 60.0):
+                reasons.append(f"Unanchored/Weak invented string below quality floor ({q_score:.1f} < 66.0)")
+
+        # 3. Hard gate: Contradictory modifier compounds
+        is_glue = candidate.get("is_word_glue") or q_break.get("word_glue_penalty", 0) > 30
+        glue_type = candidate.get("glue_type") or q_break.get("glue_type")
+        if is_glue and glue_type == "CONTRADICTORY_MODIFIER_GLUE":
+            reasons.append("Contradictory negative modifier compound rejected from opportunities")
+
+        # 4. Overall quality score floor
+        q_score = float(candidate.get("quality_score", 70.0))
+        if q_score < 65.0:
+            reasons.append(f"Overall quality score below floor ({q_score:.1f} < 65.0)")
+
+        return (len(reasons) == 0, reasons)
+
+    @classmethod
     def assign_tier(
         cls,
         candidate: Dict[str, Any],
@@ -111,16 +239,46 @@ class QualityTierEngine:
         if ip_level in ["CRITICAL", "HIGH"]:
             return "WATCHLIST_RISK" if ip_level == "HIGH" else "REJECTED"
 
+        # PART 1 & 11 & 45: Fail-closed Atom Domain Appraisal Hard Gate
+        atom_required = os.getenv("ATOM_REQUIRED_FOR_FINAL", "true").lower() == "true"
+        atom_domain_score = candidate.get("atom_domain_score")
+        if atom_domain_score is None and isinstance(candidate.get("atom"), dict):
+            atom_domain_score = candidate["atom"].get("atom_domain_score")
+        has_atom_eval = (
+            bool(candidate.get("atom"))
+            or bool(candidate.get("atom_status"))
+            or bool(candidate.get("atom_evaluated"))
+            or bool(candidate.get("enforce_atom_gate"))
+        )
+        if atom_required and has_atom_eval:
+            atom_status = str(candidate.get("atom_status") or (candidate.get("atom") or {}).get("status") or "").strip().upper()
+            min_atom_score = float(os.getenv("ATOM_MIN_DOMAIN_SCORE", "8.0"))
+
+            if atom_status != "SUCCESS" or atom_domain_score is None:
+                candidate["atom_gate_status"] = "ATOM_UNVALIDATED"
+                return "ATOM_UNVALIDATED"
+            
+            try:
+                if float(atom_domain_score) < min_atom_score:
+                    candidate["atom_gate_status"] = "ATOM_REJECTED"
+                    return "ATOM_REJECTED"
+            except (ValueError, TypeError):
+                candidate["atom_gate_status"] = "ATOM_REJECTED"
+                return "ATOM_REJECTED"
+
         # Phase 1 (Revised) Hard Gate: EXTREMELY_WEAK invented candidates are excluded from Tier A/B
         morph = candidate.get("morphology_type") or candidate.get("naming_type")
         inv_tier = candidate.get("invented_quality_tier")
         inv_subtype = candidate.get("invented_subtype")
         brand_score = candidate.get("brandability_heuristic_score")
         if morph == "INVENTED" or inv_tier is not None:
-            # Unanchored invented names are never Tier A by subjective score alone.
-            if inv_subtype == "UNANCHORED":
-                return "TIER_C" if opportunity_score >= 68.0 else "BELOW_THRESHOLD"
             if inv_tier == "EXTREMELY_WEAK":
+                return "TIER_C" if opportunity_score >= 68.0 else "BELOW_THRESHOLD"
+            # Unanchored invented names cannot be Tier A; eligible on merit for Tier B if score >= 74 and decent brandability/WEAK
+            if inv_subtype == "UNANCHORED":
+                b_score = float(brand_score or 0.0)
+                if opportunity_score >= 74.0 and (b_score >= 70.0 or inv_tier == "WEAK"):
+                    return "TIER_B"
                 return "TIER_C" if opportunity_score >= 68.0 else "BELOW_THRESHOLD"
             # Weak invented names require explicit multi-model evidence before A/B.
             if inv_tier == "WEAK":
@@ -158,16 +316,73 @@ class QualityTierEngine:
         if c_brand < min_brand:
             critical_weaknesses.append(f"Brandability ({c_brand:.1f} < {min_brand})")
 
+        # Part S: Tier A requires STRONG or HYBRID_ANCHORED for INVENTED names
+        if morph == "INVENTED" or inv_tier is not None:
+            if inv_tier not in ["STRONG", "HYBRID_ANCHORED"] and inv_subtype != "HYBRID_ANCHORED":
+                critical_weaknesses.append(f"Invented conviction floor: requires STRONG or HYBRID_ANCHORED root (current: {inv_tier or inv_subtype})")
+
+        # Part 11: Tier A requires atom_domain_score >= ATOM_TIER_A_MIN_DOMAIN_SCORE (default 8.5)
+        atom_tier_a_min = float(os.getenv("ATOM_TIER_A_MIN_DOMAIN_SCORE", "8.5"))
+        if atom_required and atom_domain_score is not None:
+            try:
+                if float(atom_domain_score) < atom_tier_a_min:
+                    critical_weaknesses.append(f"Atom Tier A minimum score floor ({float(atom_domain_score):.1f} < {atom_tier_a_min})")
+            except (ValueError, TypeError):
+                pass
+
         candidate["tier_a_critical_weakness"] = critical_weaknesses
 
+        # Check contradictory compound ceiling
+        is_glue = candidate.get("is_word_glue") or q_break.get("word_glue_penalty", 0) > 30
+        glue_type = candidate.get("glue_type") or q_break.get("glue_type")
+        if is_glue and glue_type == "CONTRADICTORY_MODIFIER_GLUE":
+            return "TIER_C" if opportunity_score >= 68.0 else "BELOW_THRESHOLD"
+
+        # Quality Ceilings Enforcement
+        from quality_engine.config import get_quality_ceilings_config, get_atom_config
+        ceilings = get_quality_ceilings_config()
+        allowed_tiers = ["TIER_A", "TIER_B", "WATCHLIST"]
+        if morph == "INVENTED" or inv_tier is not None:
+            if inv_tier == "STRONG":
+                target_ceil = "STRONG"
+            elif inv_subtype in ["LEXICAL_ANCHORED", "SEMANTIC_ANCHORED", "PHONETIC_ANCHORED"] or inv_tier == "MODERATE":
+                target_ceil = "MODERATE"
+            elif inv_tier == "WEAK":
+                target_ceil = "WEAK"
+            else:
+                target_ceil = "UNANCHORED"
+
+            allowed_tiers = ceilings.get(target_ceil, {}).get("allowed_tiers", ["TIER_A", "TIER_B", "WATCHLIST"])
+
+        # Atom Appraisal Hard Gate (Parts 1, 11, 28)
+        atom_cfg = get_atom_config()
+        atom_data = candidate.get("atom")
+        if atom_data and isinstance(atom_data, dict) and atom_data.get("status"):
+            atom_status = str(atom_data.get("status", "")).upper()
+            atom_score = atom_data.get("atom_domain_score")
+            min_domain_score = float(atom_cfg.get("min_domain_score", 8.0))
+            min_tier_a = float(atom_cfg.get("tier_a_min_score", 8.5))
+
+            if atom_status != "SUCCESS" or atom_score is None:
+                candidate["atom_gate_status"] = "ATOM_UNVALIDATED"
+                return "ATOM_UNVALIDATED"
+            if float(atom_score) < min_domain_score:
+                candidate["atom_gate_status"] = "ATOM_REJECTED"
+                return "ATOM_REJECTED"
+            if float(atom_score) < min_tier_a:
+                allowed_tiers = [t for t in allowed_tiers if t != "TIER_A"]
+
         if opportunity_score >= min_tier_a_score and ip_level in ["LOW", "NOT_CHECKED"]:
-            if not critical_weaknesses:
+            if not critical_weaknesses and "TIER_A" in allowed_tiers:
                 return "TIER_A"
             else:
-                # Demoted from Tier A to Tier B due to quality floor breach
-                return "TIER_B" if opportunity_score >= 74.0 else "TIER_C"
+                # Demoted from Tier A to Tier B or Watchlist due to floor breach or ceiling restriction
+                if "TIER_B" in allowed_tiers and opportunity_score >= 74.0:
+                    return "TIER_B"
+                else:
+                    return "TIER_C"
         elif opportunity_score >= 74.0:
-            return "TIER_B"
+            return "TIER_B" if "TIER_B" in allowed_tiers else "TIER_C"
         elif opportunity_score >= 68.0:
             return "TIER_C"
         else:

@@ -112,7 +112,7 @@ def metaphone(word: str, max_length: int = 6) -> str:
             else:
                 result.append('K')  # Hard G
         elif c == 'H':
-            if nxt in 'AEIOU' and prv not in 'CGPST':
+            if nxt in 'AEIOU' and (not prv or prv not in 'CGPST'):
                 result.append('H')
         elif c == 'J':
             result.append('J')
@@ -216,15 +216,28 @@ class PhoneticEngine:
         snd_a = soundex(a)
         snd_b = soundex(b)
 
-        # 1. Exact metaphone match
+        # Syllable and length alignment constraints
+        syl_a = max(1, len(re.findall(r"[aeiouy]+", a)))
+        syl_b = max(1, len(re.findall(r"[aeiouy]+", b)))
+        syl_diff = abs(syl_a - syl_b)
+        len_diff = abs(len(a) - len(b))
+        seq_ratio = SequenceMatcher(None, a, b).ratio()
+
+        # 1. Exact metaphone match: genuine homophones require syllable and length harmony
         if meta_a and meta_a == meta_b:
-            return 0.95
+            if syl_diff == 0 and len_diff <= 1 and seq_ratio >= 0.70:
+                return 0.95
+            elif syl_diff <= 1 and len_diff <= 2 and seq_ratio >= 0.60:
+                return round(max(0.65, min(0.85, 0.70 + (seq_ratio * 0.20) - (len_diff * 0.05))), 3)
+            else:
+                # Different syllable count / large length mismatch cannot be an authentic phonetic homophone
+                return round(max(0.35, min(0.65, 0.45 + (seq_ratio * 0.25) - (len_diff * 0.06) - (syl_diff * 0.10))), 3)
 
         # 2. Metaphone sequence similarity
         meta_ratio = SequenceMatcher(None, meta_a, meta_b).ratio() if (meta_a and meta_b) else 0.0
 
         # 3. Soundex equivalence
-        soundex_bonus = 0.25 if snd_a == snd_b else 0.0
+        soundex_bonus = 0.20 if snd_a == snd_b else 0.0
 
         # 4. Common phonetic prefix
         common_len = 0
@@ -235,8 +248,8 @@ class PhoneticEngine:
                 break
         prefix_ratio = (common_len / max(len(meta_a), len(meta_b))) if max(len(meta_a), len(meta_b)) > 0 else 0.0
 
-        score = (meta_ratio * 0.5) + soundex_bonus + (prefix_ratio * 0.25)
-        return min(1.0, max(0.0, score))
+        score = (meta_ratio * 0.45) + soundex_bonus + (prefix_ratio * 0.20) + (seq_ratio * 0.15) - (syl_diff * 0.08) - (len_diff * 0.04)
+        return round(min(1.0, max(0.0, score)), 3)
 
     @classmethod
     def get_composite_phonetic_key(cls, domain_or_label: str) -> str:

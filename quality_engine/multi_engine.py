@@ -23,22 +23,22 @@ import logging
 import datetime
 from typing import List, Dict, Any, Optional, Set, Tuple
 
-from quality_engine.config import MIN_CANDIDATE_LENGTH, MAX_CANDIDATE_LENGTH
+from quality_engine.config import (
+    MIN_CANDIDATE_LENGTH,
+    MAX_CANDIDATE_LENGTH,
+    CANONICAL_STRATEGY_QUOTAS,
+    get_invented_generation_config,
+    validate_strategy_quotas
+)
 from quality_engine.one_word_engine import OneWordQualityEngine, CORE_VOCAB_SAMPLE, REAL_3_LETTER_WORDS
 from quality_engine.morphology_classifier import MorphologyClassifier
+from quality_engine.invented_quality import COMMERCIAL_ANCHOR_ROOTS
 
 logger = logging.getLogger("MultiEngineGenerator")
 
-# Target quotas per run (total = 1950)
-INITIAL_STRATEGY_QUOTAS: Dict[str, int] = {
-    "ONE_WORD": 300,
-    "INVENTED": 400,
-    "SEMANTIC": 350,
-    "COMPOUND": 300,
-    "PREFIX_SUFFIX": 200,
-    "TREND": 200,
-    "KEYWORD_BRANDABLE": 200
-}
+# Authoritative baseline strategy quotas (Single source of truth from config.py)
+INITIAL_STRATEGY_QUOTAS: Dict[str, int] = CANONICAL_STRATEGY_QUOTAS.copy()
+
 
 # Authentic English dictionary words for ONE_WORD engine (expanded, 5-12 chars, authentic lexicon)
 CURATED_DICTIONARY_ONE_WORDS: List[str] = [
@@ -174,29 +174,78 @@ Output as a comma-separated list of .com domains."""
 
 class InventedBrandEngine(BaseNamingEngine):
     """
-    Generates pronounceable invented brand names using diverse phonetic templates:
-    CVCVC, CVCVCV, CVCCVC, CVCVCC, CVCCVCV, VCCVCV.
-    Guarantees vowel balance, strong phonetics, low spelling ambiguity, 5-9 chars.
-    Controls repetition and avoids identical-looking families (e.g. no Xvira/Xviro/Xvirox clusters).
+    Generates coined, intentional brand names using Anchor-Driven Transformation (Part E)
+    combined with a controlled exploration path for novel neologisms (Part F).
+    Eliminates pure random CVC template generation.
     """
     CONSONANTS = ["b", "c", "d", "f", "g", "h", "k", "l", "m", "n", "p", "r", "s", "t", "v", "w", "z"]
     SOFT_CONSONANTS = ["l", "m", "n", "r", "s", "v", "z"]
     STRONG_CONSONANTS = ["b", "d", "k", "p", "t", "c"]
     VOWELS = ["a", "e", "i", "o", "u"]
-    TEMPLATES = ["CVCVC", "CVCVCV", "CVCCVC", "CVCVCC", "CVCCVCV", "VCCVCV"]
+    COINED_SUFFIXES = ["a", "o", "is", "ex", "ix", "or", "us", "en", "on", "er", "ium", "os", "al", "ic", "ora", "ia", "el"]
+    SHORT_ROOT_MORPHEMES = ["syn", "nov", "nex", "zen", "vox", "ver", "vect", "sol", "lum", "puls", "forg", "arch", "apex", "strid", "kin"]
 
-    def _generate_template_word(self, template: str, rng: random.Random) -> str:
+    def _generate_anchored_candidate(self, root: str, rng: random.Random) -> Optional[str]:
+        """
+        Controlled morphological transformation of a real semantic root (Part E):
+        1. Lexical truncation + coined suffix (e.g. vector -> vecta, kinetic -> kinetoc)
+        2. Lexical extension (e.g. pulse -> pulsera, haven -> havena)
+        3. Controlled vowel mutation (e.g. blend -> blenda, scale -> scala)
+        4. Morpheme fusion (e.g. nov + pulse -> novapulse, sol + ora -> solora)
+        """
+        root = root.lower().strip()
+        if len(root) < 3:
+            return None
+
+        mode = rng.choice(["suffix", "truncate_suffix", "vowel_shift", "fuse_morpheme"])
+        if mode == "suffix":
+            sfx = rng.choice(self.COINED_SUFFIXES)
+            cand = (root[:-1] if root.endswith("e") and sfx[0] in "aeiou" else root) + sfx
+        elif mode == "truncate_suffix":
+            trunc_len = 4 if len(root) >= 5 else 3
+            cand = root[:trunc_len] + rng.choice(self.COINED_SUFFIXES)
+        elif mode == "vowel_shift":
+            v_indices = [i for i, c in enumerate(root) if c in "aeiou"]
+            if v_indices:
+                idx = rng.choice(v_indices)
+                v_alt = rng.choice([v for v in "aeiou" if v != root[idx]])
+                chars = list(root)
+                chars[idx] = v_alt
+                cand = "".join(chars) + rng.choice(["", "a", "o", "is"])
+            else:
+                cand = root + "a"
+        else:
+            m = rng.choice(self.SHORT_ROOT_MORPHEMES)
+            cand = m + (root[:4] if len(root) >= 4 else root)
+
+        if 5 <= len(cand) <= 9:
+            harsh = {"zt", "fq", "gq", "zk", "xz", "zx", "jx", "xj", "vj", "jv", "qp"}
+            if not any(cand[i:i+2] in harsh for i in range(len(cand)-1)):
+                return cand
+        return None
+
+    def _generate_exploration_candidate(self, rng: random.Random) -> Optional[str]:
+        """Controlled exploration of novel neologisms (Part F) with strict phonotactic gating"""
+        templates = ["CVCVC", "CVCVCV", "CVCCVC"]
+        t = rng.choice(templates)
         chars = []
-        for i, char_type in enumerate(template):
+        for i, char_type in enumerate(t):
             if char_type == "C":
-                # Alternate between soft and strong consonants to avoid awkward clusters
-                if i > 0 and template[i-1] == "C":
+                if i > 0 and t[i-1] == "C":
                     chars.append(rng.choice(self.SOFT_CONSONANTS))
                 else:
                     chars.append(rng.choice(self.CONSONANTS))
-            elif char_type == "V":
+            else:
                 chars.append(rng.choice(self.VOWELS))
-        return "".join(chars)
+        word = "".join(chars)
+
+        if 5 <= len(word) <= 7:
+            harsh = {"zt", "fq", "gq", "zk", "xz", "zx", "jx", "xj", "vj", "jv", "qp"}
+            if not any(word[i:i+2] in harsh for i in range(len(word)-1)):
+                rare_letters = sum(1 for ch in word if ch in ["q", "x", "z", "j"])
+                if rare_letters <= 1:
+                    return word
+        return None
 
     async def generate(self, concept: str, category: str = "AI & Technology", count: int = 400) -> List[Dict[str, Any]]:
         candidates = []
@@ -205,16 +254,17 @@ class InventedBrandEngine(BaseNamingEngine):
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         rng = random.Random(int(time.time() * 1000) % 999999)
 
-        # 1. AI Generation if router available
+        # 1. AI Generation if router available (Part H: Coined from intentional roots)
         if self.router:
-            prompt = f"""Generate {min(count, 100)} original, pronounceable INVENTED brand names ending in .com (5 to 8 letters) for: "{concept}".
-Requirements:
-1. Harmonious phonetics like Figma, Stripe, Canva, Zillow, Vercel, Asana, Twilio.
-2. Vowel-balanced, natural rhythm.
-3. DO NOT repeat prefix families (no Xvira, Xviro, Xvirox, Xvera).
-4. Output as a comma-separated list of .com domains."""
+            prompt = f"""Generate {min(count, 100)} original, pronounceable COINED brand names ending in .com (5 to 8 letters) conceptually inspired by: "{concept}".
+Rules:
+1. Each name MUST be derived from an intentional transformation of a recognizable concept, semantic root, or meaningful morpheme (e.g. Kinetic -> Kinetoc, Vector -> Vectra, Pulse -> Pulsera, Nexus -> Nexora, Stride -> Stridex).
+2. DO NOT output random consonant-vowel mashups or arbitrary letter strings.
+3. Avoid excessive consonant stuffing or forced synthetic suffixes (-ix, -ox, -vix, -tra).
+4. DO NOT repeat prefix families.
+5. Output exclusively as a comma-separated list of .com domains."""
             try:
-                res = await self.router.execute_task("domain_generation", prompt, temperature=0.8, max_tokens=1200)
+                res = await self.router.execute_task("domain_generation", prompt, temperature=0.75, max_tokens=1200)
                 words = re.split(r"[\n,;]+", res)
                 for w in words:
                     d = self.clean_domain(w)
@@ -231,33 +281,81 @@ Requirements:
                                 "source_concept": concept,
                                 "market_category": category,
                                 "generator_model": "invented_ai_engine",
-                                "generation_timestamp": now_iso
+                                "generation_timestamp": now_iso,
+                                "is_anchored": True,
+                                "is_exploration": False,
+                                "invented_subdistribution": "ANCHORED_INVENTED"
                             })
             except Exception as e:
                 logger.warning(f"InventedBrandEngine AI generation failed: {e}")
 
-        # 2. Multi-template phonetic algorithmic generation
-        while len(candidates) < count:
-            t = rng.choice(self.TEMPLATES)
-            word = self._generate_template_word(t, rng)
+        # 2. Algorithmic Anchor-Driven Generation (90% target) + Controlled Exploration (10% target) (Part E & F)
+        inv_cfg = get_invented_generation_config()
+        anchored_ratio = float(inv_cfg.get("anchored_ratio_target", 0.90))
+        target_anchored = int(count * anchored_ratio)
+
+        # Build seed roots from concept, commercial anchor roots, and authentic roots
+        concept_tokens = [w.lower() for w in re.findall(r'[a-zA-Z]{4,}', concept)]
+        candidate_roots = list(set(concept_tokens + list(COMMERCIAL_ANCHOR_ROOTS) + list(AUTHENTIC_COMPOUND_ROOTS)))
+        rng.shuffle(candidate_roots)
+
+        # 2a. Generate Anchored Invented Candidates
+        root_idx = 0
+        attempts = 0
+        max_attempts = count * 15
+
+        while len(candidates) < target_anchored and attempts < max_attempts:
+            attempts += 1
+            root = candidate_roots[root_idx % len(candidate_roots)]
+            root_idx += 1
+            word = self._generate_anchored_candidate(root, rng)
+            if not word:
+                continue
             d = f"{word}.com"
             family = word[:4] if len(word) >= 4 else word
-
             if d not in seen and prefix_family_counts.get(family, 0) < 2:
-                # Basic phonetic filter: avoid q, x, z overuse
-                rare_letters = sum(1 for ch in word if ch in ["q", "x", "z", "j"])
-                if rare_letters <= 1:
-                    seen.add(d)
-                    prefix_family_counts[family] = prefix_family_counts.get(family, 0) + 1
-                    candidates.append({
-                        "domain": d,
-                        "generation_strategy": "INVENTED",
-                        "naming_type": "INVENTED",
-                        "source_concept": concept,
-                        "market_category": category,
-                        "generator_model": "phonetic_template_engine",
-                        "generation_timestamp": now_iso
-                    })
+                seen.add(d)
+                prefix_family_counts[family] = prefix_family_counts.get(family, 0) + 1
+                candidates.append({
+                    "domain": d,
+                    "generation_strategy": "INVENTED",
+                    "naming_type": "INVENTED",
+                    "source_concept": concept,
+                    "market_category": category,
+                    "generator_model": "anchor_driven_invented_engine",
+                    "generation_timestamp": now_iso,
+                    "is_anchored": True,
+                    "is_exploration": False,
+                    "invented_subdistribution": "ANCHORED_INVENTED",
+                    "source_root": root
+                })
+
+        # 2b. Generate Controlled Exploration Candidates (up to remaining count)
+        while len(candidates) < count and attempts < max_attempts * 2:
+            attempts += 1
+            word = self._generate_exploration_candidate(rng)
+            if not word:
+                continue
+            d = f"{word}.com"
+            family = word[:4] if len(word) >= 4 else word
+            if d not in seen and prefix_family_counts.get(family, 0) < 2:
+                seen.add(d)
+                prefix_family_counts[family] = prefix_family_counts.get(family, 0) + 1
+                candidates.append({
+                    "domain": d,
+                    "generation_strategy": "INVENTED",
+                    "naming_type": "INVENTED",
+                    "source_concept": concept,
+                    "market_category": category,
+                    "generator_model": "controlled_exploration_engine",
+                    "generation_timestamp": now_iso,
+                    "is_anchored": False,
+                    "is_exploration": True,
+                    "invented_subdistribution": "EXPLORATION_INVENTED"
+                })
+
+        return candidates[:count]
+
 
         return candidates[:count]
 
@@ -646,10 +744,33 @@ class MultiEngineOrchestrator:
             strat_exploit = int(exploitation_budget * (weights[s] / total_weight))
             quotas[s] = max(40, per_strat_exploration + strat_exploit)
 
-        # Re-normalize sum to target_total
+        # Re-normalize sum to target_total without assigning diff to INVENTED (Part B)
         current_sum = sum(quotas.values())
         diff = target_total - current_sum
-        quotas["INVENTED"] += diff
+        inv_cfg = get_invented_generation_config()
+        max_inv_ratio = float(inv_cfg.get("max_ratio", 0.18))
+        max_inv_count = int(round(target_total * max_inv_ratio))
+
+        # Enforce max ratio cap on INVENTED
+        if quotas.get("INVENTED", 0) > max_inv_count:
+            excess = quotas["INVENTED"] - max_inv_count
+            quotas["INVENTED"] = max_inv_count
+            diff += excess
+
+        # Distribute remaining diff across non-invented strategies
+        non_inv = [s for s in strategies if s != "INVENTED"]
+        if non_inv and diff != 0:
+            step = 1 if diff > 0 else -1
+            rem = abs(diff)
+            for idx in range(rem):
+                s = non_inv[idx % len(non_inv)]
+                quotas[s] = max(40, quotas[s] + step)
+
+        # Final pass to ensure exact equality with target_total
+        final_sum = sum(quotas.values())
+        final_diff = target_total - final_sum
+        if final_diff != 0:
+            quotas["COMPOUND"] = max(40, quotas["COMPOUND"] + final_diff)
 
         return quotas
 
@@ -661,7 +782,7 @@ class MultiEngineOrchestrator:
     ) -> List[Dict[str, Any]]:
         """
         Executes generation across all 7 engines using dynamically balanced quotas.
-        Dynamically reallocates capacity if one strategy underproduces.
+        Dynamically reallocates capacity if one strategy underproduces (Part B).
         """
         quotas = self.calculate_dynamic_quotas(strategy_stats, target_total)
         logger.info(f"[MULTI-ENGINE] Dynamic strategy quotas allocated: {quotas} (Target Total: {target_total})")
@@ -705,15 +826,56 @@ class MultiEngineOrchestrator:
                 logger.warning(f"[MULTI-ENGINE] Strategy {strategy_name} failed: {res}")
                 deficit += target_count
 
-        # Reallocate deficit to strongest engine (e.g. invented / compound) if deficit > 50
+        # Part B: Weighted deficit redistribution across healthy non-failed strategies (never solely INVENTED)
         if deficit > 50:
-            logger.info(f"[MULTI-ENGINE] Reallocating deficit of {deficit} candidates to InventedBrandEngine...")
-            extra = await self.invented_engine.generate(primary_concept, category, count=deficit)
-            for item in extra:
-                d = item["domain"]
-                if d not in seen:
-                    seen.add(d)
-                    all_candidates.append(item)
+            healthy_strats = [
+                s for s in engine_keys
+                if s != "INVENTED" and quotas.get(s, 0) > 0
+            ]
+            inv_total_gen = sum(1 for c in all_candidates if c.get("generation_strategy") == "INVENTED")
+            inv_cfg = get_invented_generation_config()
+            max_inv_allowed = int(round(target_total * float(inv_cfg.get("max_ratio", 0.18))))
+            can_use_invented = (inv_total_gen < max_inv_allowed)
+
+            eligible_strats = list(healthy_strats)
+            if can_use_invented:
+                eligible_strats.append("INVENTED")
+
+            logger.info(
+                f"[MULTI-ENGINE] Yield shortfall! Reallocating deficit of {deficit} candidates "
+                f"proportionally across healthy strategies: {eligible_strats}..."
+            )
+
+            # Distribute deficit proportionally
+            refill_counts = {s: deficit // len(eligible_strats) for s in eligible_strats}
+            remainder = deficit % len(eligible_strats)
+            for idx in range(remainder):
+                refill_counts[eligible_strats[idx]] += 1
+
+            refill_tasks = []
+            strat_engine_map = {
+                "ONE_WORD": self.one_word_engine,
+                "INVENTED": self.invented_engine,
+                "SEMANTIC": self.semantic_engine,
+                "COMPOUND": self.compound_engine,
+                "PREFIX_SUFFIX": self.prefix_suffix_engine,
+                "TREND": self.trend_engine,
+                "KEYWORD_BRANDABLE": self.keyword_brandable_engine
+            }
+
+            for s, r_count in refill_counts.items():
+                if r_count > 0 and s in strat_engine_map:
+                    refill_tasks.append(strat_engine_map[s].generate(primary_concept, category, count=r_count))
+
+            refill_results = await asyncio.gather(*refill_tasks, return_exceptions=True)
+            for res_list in refill_results:
+                if isinstance(res_list, list):
+                    for item in res_list:
+                        d = item["domain"]
+                        if d not in seen:
+                            seen.add(d)
+                            all_candidates.append(item)
+
 
         logger.info(f"[MULTI-ENGINE] Generation complete. Generated {len(all_candidates)} candidates across 7 engines.")
         return all_candidates

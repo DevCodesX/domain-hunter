@@ -47,6 +47,8 @@
         selectedHuntTier: 'all',
         cachedDashDomains: [],
         cachedHuntDomains: [],
+        latestStats: null,
+        latestFunnel: null,
         userFeedbackMap: {},
         pendingRejectDomain: null
     };
@@ -278,6 +280,8 @@
         try {
             const res = await fetch('/api/domains/latest');
             const data = await res.json();
+            if (data.stats) state.latestStats = data.stats;
+            if (data.funnel) state.latestFunnel = data.funnel;
             
             if (data.domains && data.domains.length > 0) {
                 // Hard contract: Only display verified AVAILABLE_STANDARD domains (no mock in production)
@@ -287,15 +291,7 @@
                 });
                 renderDomainCards(container, verifiedOnly, 'dash');
             } else {
-                if (container) {
-                    container.innerHTML = `
-                        <div style="grid-column: 1/-1; text-align: center; padding: 2.5rem; background: rgba(0,0,0,0.2); border-radius: var(--radius-md); border: 1px dashed var(--border-subtle); color: var(--text-muted);">
-                            <i class="fa-solid fa-magnifying-glass fa-2x" style="margin-bottom: 0.75rem; opacity: 0.5;"></i>
-                            <div style="font-weight: 600; color: #fff; margin-bottom: 0.25rem;">No Verified Opportunities Yet</div>
-                            <p style="font-size: 0.82rem;">Run a domain hunt to discover and verify fresh available .com opportunities.</p>
-                        </div>
-                    `;
-                }
+                renderDomainCards(container, [], 'dash');
             }
 
             // Concepts Feed
@@ -407,6 +403,125 @@
         }
     }
 
+    function renderDiagnosticFunnelHtml(funnel, stats) {
+        funnel = funnel || (stats && stats.funnel) || (state.huntStatus && (state.huntStatus.funnel || state.huntStatus.stats?.funnel)) || {};
+        const fc = funnel.funnel_counters || funnel || {};
+        const rr = funnel.funnel_rejection_reasons || {};
+        
+        const available = fc.stage9_available_standard ?? funnel.available_standard ?? state.huntStatus?.available_standard ?? 0;
+        const ipPass = fc.stage9_safe_scored ?? funnel.ip_passed ?? available;
+        const mmInput = fc.stage9_consensus_input ?? funnel.multi_model_evaluated ?? available;
+        const consensusPass = fc.stage9_consensus_pass ?? funnel.consensus_pass ?? 0;
+        const qualityPass = fc.stage9_quality_floor_passed ?? funnel.quality_floor_pass ?? 0;
+        const atomVal = fc.stage9_atom_validated ?? funnel.atom_validated ?? 0;
+        const finalCount = fc.stage9_final_selected ?? funnel.final ?? 0;
+
+        const mmSummary = funnel.multi_model_summary || {};
+        const expectedModels = mmSummary.expected_models || 57;
+        const avgCompleted = mmSummary.avg_completed_models || (mmSummary.total_calls ? Math.round(mmSummary.total_calls / Math.max(1, mmInput)) : 0);
+        const coveragePct = mmSummary.coverage_pct || (expectedModels > 0 && avgCompleted > 0 ? ((avgCompleted / expectedModels) * 100).toFixed(1) : (mmInput > 0 ? '100.0' : '0.0'));
+
+        const rejections = [
+            { label: 'Consensus Rejected', count: rr.consensus_rejected || 0, icon: 'fa-users-slash' },
+            { label: 'Quality Floor', count: rr.quality_floor || 0, icon: 'fa-shield-halved' },
+            { label: 'Brand Floor', count: rr.brand_floor || 0, icon: 'fa-tag' },
+            { label: 'Commercial Floor', count: rr.commercial_floor || 0, icon: 'fa-chart-line' },
+            { label: 'Linguistic Floor', count: rr.linguistic_floor || 0, icon: 'fa-language' },
+            { label: 'Atom Unvalidated', count: rr.atom_unvalidated || 0, icon: 'fa-atom' },
+            { label: 'Atom Score Floor', count: rr.atom_score_too_low || 0, icon: 'fa-atom' },
+            { label: 'Atom Disconnected', count: rr.atom_not_connected || 0, icon: 'fa-plug-circle-xmark' },
+            { label: 'Red Team Rejected', count: rr.red_team || 0, icon: 'fa-triangle-exclamation' },
+            { label: 'Gibberish / Noise', count: (rr.gibberish || 0) + (rr.short_but_meaningless || 0), icon: 'fa-font-awesome' },
+            { label: 'Diversity Cap', count: rr.diversity || 0, icon: 'fa-cubes-stacked' },
+            { label: 'Missing Model Eval', count: rr.missing_model_evaluation || 0, icon: 'fa-server' }
+        ].filter(r => r.count > 0);
+
+        const steps = [
+            { name: 'AVAILABLE', count: available, icon: 'fa-circle-check', color: '#10b981' },
+            { name: 'IP PASS', count: ipPass, icon: 'fa-shield', color: '#06b6d4' },
+            { name: 'MULTI-MODEL', count: mmInput, icon: 'fa-brain', color: '#3b82f6', sub: `${coveragePct}% cov` },
+            { name: 'CONSENSUS', count: consensusPass, icon: 'fa-handshake', color: '#8b5cf6' },
+            { name: 'QUALITY PASS', count: qualityPass, icon: 'fa-award', color: '#ec4899' },
+            { name: 'ATOM VALID', count: atomVal, icon: 'fa-atom', color: '#f59e0b' },
+            { name: 'FINAL', count: finalCount, icon: 'fa-flag-checkered', color: finalCount > 0 ? '#10b981' : '#ef4444' }
+        ];
+
+        let diagMsg = '';
+        if (rr.atom_unvalidated > 0 || rr.atom_not_connected > 0 || rr.atom_score_too_low > 0) {
+            diagMsg = `Candidates survived quality & consensus gates, but were blocked awaiting successful Atom appraisal (<code>ATOM_REQUIRED_FOR_FINAL=true</code>). Fail-closed safety active.`;
+        } else if (consensusPass === 0 && available > 0) {
+            diagMsg = `Candidates were evaluated by the multi-model AI pool, but none passed the multi-model consensus agreement threshold.`;
+        } else if (qualityPass === 0 && available > 0) {
+            diagMsg = `Candidates were evaluated but did not satisfy the strict quality floor thresholds.`;
+        } else if (available === 0) {
+            diagMsg = `No standard available .com domains were discovered in this hunt run. Run a domain hunt to evaluate candidates.`;
+        } else {
+            diagMsg = `Strict multi-stage filters eliminated candidates to prevent low-quality domains from entering production.`;
+        }
+
+        return `
+            <div style="grid-column: 1/-1; background: rgba(13, 17, 23, 0.9); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--radius-lg); padding: 1.75rem; box-shadow: 0 12px 36px rgba(0,0,0,0.5);">
+                <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 1rem; margin-bottom: 1.25rem;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 0.6rem;">
+                            <span style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; background: rgba(239, 68, 68, 0.15); color: #ef4444; font-size: 0.9rem;">
+                                <i class="fa-solid fa-filter-circle-xmark"></i>
+                            </span>
+                            <span style="font-weight: 700; color: #fff; font-size: 1.1rem; letter-spacing: 0.3px;">Pipeline Diagnostic Funnel — 0 Final Candidates</span>
+                            <span style="font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); font-weight: 600;">FAIL-CLOSED AUDIT</span>
+                        </div>
+                        <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.35rem;">
+                            The pipeline completed with fail-closed safety. Real-time diagnostic telemetry below details candidate attrition and rejection causes.
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(115px, 1fr)); gap: 0.6rem; margin-bottom: 1.5rem;">
+                    ${steps.map((st) => `
+                        <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05); border-radius: var(--radius-md); padding: 0.75rem; text-align: center;">
+                            <div style="font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; margin-bottom: 0.25rem; display: flex; align-items: center; justify-content: center; gap: 0.35rem;">
+                                <i class="fa-solid ${st.icon}" style="color: ${st.color}; font-size: 0.75rem;"></i>
+                                ${st.name}
+                            </div>
+                            <div style="font-size: 1.35rem; font-weight: 700; color: ${st.count > 0 ? '#fff' : 'var(--text-muted)'}; line-height: 1.2;">
+                                ${st.count}
+                            </div>
+                            ${st.sub ? `<div style="font-size: 0.68rem; color: #3b82f6; margin-top: 0.2rem;">${st.sub}</div>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+
+                ${rejections.length > 0 ? `
+                    <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.05); border-radius: var(--radius-md); padding: 1rem; margin-bottom: 1.25rem;">
+                        <div style="font-size: 0.82rem; font-weight: 600; color: #e2e8f0; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.45rem;">
+                            <i class="fa-solid fa-circle-exclamation" style="color: #f59e0b;"></i> Candidate Rejection Breakdown (${rejections.reduce((a, b) => a + b.count, 0)} total)
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.6rem;">
+                            ${rejections.map(r => `
+                                <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; background: rgba(255,255,255,0.02); border-radius: 6px; border: 1px solid rgba(255,255,255,0.03);">
+                                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                        <i class="fa-solid ${r.icon}" style="color: #94a3b8; font-size: 0.8rem; width: 14px;"></i>
+                                        <span style="font-size: 0.78rem; color: #cbd5e1;">${escapeHtml(r.label)}</span>
+                                    </div>
+                                    <span style="font-size: 0.8rem; font-weight: 700; color: #f87171; background: rgba(239,68,68,0.12); padding: 1px 8px; border-radius: 4px;">
+                                        ${r.count}
+                                    </span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+
+                <div style="padding: 0.85rem 1rem; border-radius: var(--radius-md); background: rgba(0, 212, 255, 0.04); border: 1px solid rgba(0, 212, 255, 0.15); display: flex; align-items: flex-start; gap: 0.75rem;">
+                    <i class="fa-solid fa-circle-info" style="color: #00d4ff; margin-top: 0.15rem;"></i>
+                    <div style="font-size: 0.8rem; color: #94a3b8; line-height: 1.45;">
+                        <span style="color: #fff; font-weight: 600;">Diagnosis:</span> ${diagMsg}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     function renderDomainCards(container, domains, context = 'dash') {
         if (!container) return;
         if (context === 'dash') state.cachedDashDomains = domains;
@@ -418,11 +533,15 @@
             : domains.filter(d => getDomainTier(d) === currentTier);
 
         if (!filtered || filtered.length === 0) {
-            container.innerHTML = `
-                <div style="grid-column: 1/-1; text-align: center; padding: 2.5rem; color: var(--text-muted); background: rgba(0,0,0,0.15); border-radius: var(--radius-md); border: 1px dashed var(--border-subtle);">
-                    No verified opportunities match the "${escapeHtml(currentTier)}" filter.
-                </div>
-            `;
+            if (domains && domains.length > 0) {
+                container.innerHTML = `
+                    <div style="grid-column: 1/-1; text-align: center; padding: 2.5rem; color: var(--text-muted); background: rgba(0,0,0,0.15); border-radius: var(--radius-md); border: 1px dashed var(--border-subtle);">
+                        No verified opportunities match the "${escapeHtml(currentTier)}" filter (${domains.length} available in other tiers).
+                    </div>
+                `;
+            } else {
+                container.innerHTML = renderDiagnosticFunnelHtml(state.latestFunnel, state.latestStats);
+            }
             return;
         }
 
@@ -503,6 +622,28 @@
                             <div class="score-item">
                                 <span class="label">Comm</span>
                                 <span class="val">${comm}</span>
+                            </div>
+                        </div>
+
+                        <!-- PART 32: ATOM & MULTI-MODEL CONSENSUS BAR -->
+                        <div class="atom-consensus-bar" style="margin-top: 0.65rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 0.35rem 0.55rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.35rem;">
+                            ${d.atom_status === 'SUCCESS' && d.atom_domain_score !== undefined && d.atom_domain_score !== null ? `
+                                <div style="display: flex; align-items: center; gap: 0.35rem;">
+                                    <span style="font-weight: 700; color: #fff; background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 0.12rem 0.4rem; border-radius: 3px; font-family: var(--font-mono); font-size: 0.68rem;">
+                                        ATOM ${Number(d.atom_domain_score).toFixed(1)}/10
+                                    </span>
+                                    <span style="color: var(--secondary); font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600;" title="Atom Estimated Value">
+                                        ${d.atom_appraisal_value ? `$${Math.round(d.atom_appraisal_value).toLocaleString()}` : '$0'}
+                                    </span>
+                                </div>
+                            ` : `
+                                <span style="color: var(--warning); font-family: var(--font-mono); font-size: 0.68rem; display: flex; align-items: center; gap: 0.25rem;">
+                                    <i class="fa-solid fa-clock"></i> ATOM VALIDATION PENDING
+                                </span>
+                            `}
+                            <div style="display: flex; gap: 0.5rem; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.68rem;">
+                                <span>Consensus: <strong style="color: #fff;">${d.consensus_score !== undefined ? Math.round(d.consensus_score) : overall}</strong></span>
+                                <span>Conf: <strong style="color: var(--secondary);">${d.consensus_confidence !== undefined ? Math.round(d.consensus_confidence) : 85}%</strong></span>
                             </div>
                         </div>
 
@@ -660,6 +801,26 @@
     ];
 
     async function triggerManualHunt() {
+        // Part 6 & 35: Detect ATOM_REQUIRED_FOR_FINAL before hunt starts
+        try {
+            const setRes = await fetch('/api/settings');
+            const setData = await setRes.json();
+            const atomCfg = (setData && setData.atom) || {};
+            if (atomCfg.required_for_final && !atomCfg.configured) {
+                const guardModal = document.getElementById('atom-guard-modal');
+                if (guardModal) {
+                    guardModal.classList.add('active');
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn('Could not verify Atom settings before hunt:', e);
+        }
+
+        await executeManualHunt();
+    }
+
+    async function executeManualHunt() {
         try {
             const btn = document.getElementById('btn-topbar-run-hunt');
             const heroBtn = document.getElementById('btn-hero-run-hunt');
@@ -684,7 +845,12 @@
             }
 
             if (res.ok && data.status === 'started') {
-                showToast('⚡ Domain Hunt started successfully!');
+                if (data.atom_warning) {
+                    showToast('⚠️ Domain Hunt running internally (Atom Validation Required for Final Publication)', 'warning');
+                    appendTerminalLine(`⚠️ [ATOM GUARD] ${data.atom_warning}`, 'warn');
+                } else {
+                    showToast('⚡ Domain Hunt started successfully!');
+                }
                 appendTerminalLine(`Domain Hunt initiated successfully (Job ID: ${data.job_id}). Monitoring stages...`, 'ok');
                 pollPipelineStatus();
             } else {
@@ -729,6 +895,8 @@
             const res = await fetch('/api/domains/status');
             const data = await res.json();
             state.huntStatus = data;
+            if (data.stats) state.latestStats = data.stats;
+            if (data.funnel) state.latestFunnel = data.funnel;
 
             updateHuntButtonsState();
 
@@ -817,6 +985,8 @@
         try {
             const res = await fetch('/api/domains/latest');
             const data = await res.json();
+            if (data.stats) state.latestStats = data.stats;
+            if (data.funnel) state.latestFunnel = data.funnel;
             if (data.domains && data.domains.length > 0) {
                 const verified = data.domains.filter(d => {
                     const trust = getProviderTrustBadge(d);
@@ -824,13 +994,7 @@
                 });
                 renderDomainCards(container, verified, 'hunt');
             } else {
-                if (container) {
-                    container.innerHTML = `
-                        <div style="grid-column: 1/-1; text-align: center; padding: 2.5rem; color: var(--text-muted);">
-                            No opportunities from latest run. Click "RUN HUNT NOW" above to start.
-                        </div>
-                    `;
-                }
+                renderDomainCards(container, [], 'hunt');
             }
         } catch (err) {
             console.error('Hunt view error:', err);
@@ -1355,8 +1519,208 @@
     }
 
     // =========================================================================
-    // AI PROVIDERS & HEALTH
     // =========================================================================
+    // AI PROVIDERS & HEALTH INFRASTRUCTURE
+    // =========================================================================
+    let currentPoolData = [];
+    let currentFamilyFilter = 'ALL';
+    let currentSearchQuery = '';
+
+    function getStatusBadgeHtml(status) {
+        const s = (status || 'STANDBY').toUpperCase();
+        let badgeClass = 'status-standby';
+        let dotIcon = 'fa-circle-dot';
+        if (s === 'ONLINE') {
+            badgeClass = 'status-online';
+            dotIcon = 'fa-circle-check';
+        } else if (s === 'RATE LIMITED') {
+            badgeClass = 'status-ratelimited';
+            dotIcon = 'fa-hourglass-half';
+        } else if (s === 'DEGRADED') {
+            badgeClass = 'status-degraded';
+            dotIcon = 'fa-triangle-exclamation';
+        } else if (s === 'UNAVAILABLE') {
+            badgeClass = 'status-unavailable';
+            dotIcon = 'fa-circle-xmark';
+        } else if (s === 'NOT CONFIGURED') {
+            badgeClass = 'status-notconfigured';
+            dotIcon = 'fa-ban';
+        }
+        return `<span class="status-badge ${badgeClass}"><i class="fa-solid ${dotIcon}"></i> ${escapeHtml(s)}</span>`;
+    }
+
+    function renderCapabilityRouting(routing) {
+        const grid = document.getElementById('capability-routing-grid');
+        if (!grid || !routing) return;
+
+        const roleTitles = {
+            "domain_generation": { title: "Domain Generation", icon: "fa-wand-magic-sparkles" },
+            "linguistic_judge": { title: "Linguistic Naturalness Judge", icon: "fa-language" },
+            "brand_judge": { title: "Brand Strategy Judge", icon: "fa-award" },
+            "commercial_judge": { title: "Commercial / Buyer Judge", icon: "fa-briefcase" },
+            "red_team": { title: "Adversarial Red Team", icon: "fa-shield-halved" },
+            "consensus_arbiter": { title: "Consensus Arbiter", icon: "fa-scale-balanced" },
+            "fast_screen": { title: "Fast Screen Pre-filter", icon: "fa-bolt" },
+            "multilingual": { title: "Multilingual Expansion", icon: "fa-earth-americas" }
+        };
+
+        grid.innerHTML = Object.entries(routing).map(([capKey, data]) => {
+            const meta = roleTitles[capKey] || { title: capKey, icon: "fa-microchip" };
+            const primary = data.primary || {};
+            const fallbacks = data.fallbacks || [];
+
+            return `
+                <div class="routing-item">
+                    <div class="routing-role-title">
+                        <i class="fa-solid ${meta.icon}" style="color: var(--secondary); font-size: 0.85rem;"></i>
+                        <span>${escapeHtml(meta.title)}</span>
+                    </div>
+                    <div class="routing-chain-row">
+                        <div class="routing-step">
+                            <span style="color: var(--text-muted); font-size: 0.72rem;">Primary Model:</span>
+                            <span class="routing-badge-primary">${escapeHtml(primary.model || 'None')}</span>
+                        </div>
+                        ${fallbacks.length > 0 ? `
+                            <div class="routing-step" style="align-items: flex-start; margin-top: 0.2rem;">
+                                <span style="color: var(--text-muted); font-size: 0.72rem;">Fallbacks (${fallbacks.length}):</span>
+                                <div style="display: flex; flex-wrap: wrap; gap: 0.25rem; justify-content: flex-end; max-width: 70%;">
+                                    ${fallbacks.map(f => `<span class="routing-badge-fallback">${escapeHtml(f.model)}</span>`).join('')}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderModelPoolGrid() {
+        const grid = document.getElementById('model-pool-grid');
+        if (!grid) return;
+
+        let filtered = currentPoolData;
+
+        // Family filter
+        if (currentFamilyFilter && currentFamilyFilter !== 'ALL') {
+            filtered = filtered.filter(m => String(m.family).toLowerCase() === currentFamilyFilter.toLowerCase());
+        }
+
+        // Search query filter
+        if (currentSearchQuery) {
+            const q = currentSearchQuery.toLowerCase();
+            filtered = filtered.filter(m =>
+                (m.name && m.name.toLowerCase().includes(q)) ||
+                (m.id && m.id.toLowerCase().includes(q)) ||
+                (m.role && m.role.toLowerCase().includes(q)) ||
+                (m.family && m.family.toLowerCase().includes(q))
+            );
+        }
+
+        if (filtered.length === 0) {
+            grid.innerHTML = `<div style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 2.5rem;">
+                No models match the filter criteria.
+            </div>`;
+            return;
+        }
+
+        grid.innerHTML = filtered.map(m => {
+            const familyClass = `family-${String(m.family || 'other').toLowerCase()}`;
+            const latencyStr = (m.latency_ms !== null && m.latency_ms !== undefined) ? `${m.latency_ms} ms` : '-';
+            const lastSuccessStr = m.last_success ? formatDate(m.last_success) : 'Never';
+
+            return `
+                <div class="pool-model-card ${familyClass}" id="card-model-${escapeHtml(m.id.replace(/[/.:]/g, '-'))}">
+                    <div>
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem;">
+                            <div>
+                                <div style="font-weight: 700; color: #fff; font-size: 0.88rem; line-height: 1.2;">
+                                    ${escapeHtml(m.name || m.id)}
+                                </div>
+                                <div style="font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted); margin-top: 0.15rem; word-break: break-all;">
+                                    ${escapeHtml(m.id)}
+                                </div>
+                            </div>
+                            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem;">
+                                ${getStatusBadgeHtml(m.status)}
+                                <span style="font-size: 0.62rem; color: var(--text-muted); text-transform: uppercase;">${escapeHtml(m.family)}</span>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 0.65rem; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 0.35rem 0.55rem; font-size: 0.72rem;">
+                            <span style="color: var(--text-muted);">Assigned Role:</span>
+                            <span style="color: var(--secondary); font-weight: 600; margin-left: 0.25rem;">${escapeHtml(m.role || 'Pool Model')}</span>
+                        </div>
+
+                        <div style="margin-top: 0.65rem; display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.74rem;">
+                            <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-subtle); padding-bottom: 0.25rem;">
+                                <span style="color: var(--text-muted);">Avg Latency:</span>
+                                <strong style="font-family: var(--font-mono); color: #fff;">${escapeHtml(latencyStr)}</strong>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-subtle); padding-bottom: 0.25rem;">
+                                <span style="color: var(--text-muted);">Success Rate:</span>
+                                <strong style="font-family: var(--font-mono); color: ${m.reliability >= 90 ? 'var(--success)' : (m.reliability >= 50 ? 'var(--warning)' : 'var(--danger)')};">
+                                    ${m.reliability}% (${m.success_count || 0})
+                                </strong>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <span style="color: var(--text-muted);">Last Success:</span>
+                                <span style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);">${escapeHtml(lastSuccessStr)}</span>
+                            </div>
+                            ${m.last_error ? `
+                                <div style="margin-top: 0.35rem; padding: 0.3rem 0.5rem; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 4px; color: var(--danger); font-size: 0.68rem; word-break: break-all;">
+                                    <i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(m.last_error)}
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 0.85rem;">
+                        <button class="btn btn-secondary btn-test-single-model" data-provider="xkiro" data-model="${escapeHtml(m.id)}" style="font-size: 0.72rem; width: 100%; padding: 0.32rem 0.6rem;">
+                            <i class="fa-solid fa-bolt"></i> <span>TEST MODEL</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Wire click handlers for individual TEST MODEL buttons
+        grid.querySelectorAll('.btn-test-single-model').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const provider = btn.getAttribute('data-provider');
+                const model = btn.getAttribute('data-model');
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>TESTING...</span>';
+
+                try {
+                    const res = await fetch('/api/providers/model/test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ provider, model })
+                    });
+                    const data = await res.json();
+                    const result = data.result || {};
+
+                    if (data.success || result.status === 'ONLINE') {
+                        showToast(`${result.model || model}: ONLINE (${result.latency_ms} ms)`, 'success');
+                    } else if (result.status === 'RATE LIMITED') {
+                        showToast(`${result.model || model}: RATE LIMITED (429)`, 'warning');
+                    } else {
+                        const err = result.last_error || 'Model probe failed';
+                        showToast(`${result.model || model}: ${result.status} (${err})`, 'error');
+                    }
+
+                    // Refresh health data
+                    await loadProvidersData();
+                } catch (err) {
+                    showToast(`Test error: ${err.message}`, 'error');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-bolt"></i> <span>TEST MODEL</span>';
+                }
+            });
+        });
+    }
+
     async function loadProvidersData() {
         const container = document.getElementById('providers-container');
         if (!container) return;
@@ -1366,8 +1730,108 @@
             const data = await res.json();
             const info = data.providers_info || {};
 
+            // Update capability routing & model pool state
+            if (data.capability_routing) {
+                renderCapabilityRouting(data.capability_routing);
+            }
+            if (data.xkiro_model_pool) {
+                currentPoolData = data.xkiro_model_pool;
+                const poolBadge = document.getElementById('pool-count-badge');
+                if (poolBadge) {
+                    poolBadge.innerText = `${currentPoolData.length} Models`;
+                }
+                renderModelPoolGrid();
+            }
+
+            // Render top infrastructure cards
             container.innerHTML = Object.entries(info).map(([key, p]) => {
-                const isOnline = p.status === 'online' || p.status === 'healthy' || p.status === 'connected';
+                if (key === 'atom' || p.provider === 'ATOM') {
+                    const isConnected = p.status === 'CONNECTED';
+                    const isConfigured = Boolean(p.configured);
+                    const dotClass = isConnected ? 'status-dot' : (isConfigured ? 'status-dot danger' : 'status-dot warning');
+                    const pillClass = isConnected ? 'available' : (isConfigured ? 'registered' : 'unknown');
+
+                    const quotaDisplay = (p.daily_limit !== null && p.daily_limit !== undefined) 
+                        ? `${p.used_today || 0} / ${p.daily_limit}` 
+                        : (p.used_today !== undefined ? `${p.used_today} used today (Account limit)` : 'Unknown');
+
+                    const remainingDisplay = (p.remaining_today !== null && p.remaining_today !== undefined)
+                        ? p.remaining_today
+                        : (isConfigured ? 'Account Quota' : '-');
+
+                    const latencyDisplay = (p.latency_ms !== null && p.latency_ms !== undefined) ? `${p.latency_ms} ms` : '-';
+                    const lastCheckTime = p.last_success_at ? formatDate(p.last_success_at) : (p.last_error_at ? formatDate(p.last_error_at) : 'Not tested yet');
+
+                    return `
+                        <div class="provider-card" style="border: 1px solid rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.03);">
+                            <div>
+                                <div class="provider-header">
+                                    <div class="provider-name">
+                                        <span class="${dotClass}"></span>
+                                        <span style="font-weight: 700; color: #fff;">ATOM DOMAIN APPRAISAL</span>
+                                    </div>
+                                    <span class="status-pill ${pillClass}">${escapeHtml((p.status || 'NOT CONFIGURED').toUpperCase())}</span>
+                                </div>
+                                <div class="provider-role" style="color: var(--text-secondary); margin-top: 0.35rem; font-size: 0.8rem;">
+                                    ${escapeHtml(p.role || 'Official Authoritative Atom Domain Appraisal & Market Evaluation')}
+                                </div>
+
+                                <div style="margin-top: 0.85rem; display: flex; flex-direction: column; gap: 0.45rem; font-size: 0.78rem;">
+                                    <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-subtle); padding-bottom: 0.3rem;">
+                                        <span style="color: var(--text-muted);">API Reachability:</span>
+                                        <strong style="color: ${p.reachable ? 'var(--success)' : 'var(--danger)'};">
+                                            ${p.reachable ? '<i class="fa-solid fa-check"></i> Connected' : '<i class="fa-solid fa-xmark"></i> Unreachable'}
+                                        </strong>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-subtle); padding-bottom: 0.3rem;">
+                                        <span style="color: var(--text-muted);">Authentication:</span>
+                                        <strong style="color: ${p.authenticated ? 'var(--success)' : (p.configured ? 'var(--danger)' : 'var(--warning)')};">
+                                            ${p.authenticated ? '<i class="fa-solid fa-check"></i> OK' : (p.configured ? '<i class="fa-solid fa-xmark"></i> FAILED' : 'NOT CONFIGURED')}
+                                        </strong>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-subtle); padding-bottom: 0.3rem;">
+                                        <span style="color: var(--text-muted);">Appraisal Scope:</span>
+                                        <strong style="color: ${p.appraisal_scope_available ? 'var(--success)' : 'var(--text-muted)'};">
+                                            ${p.appraisal_scope_available ? '<i class="fa-solid fa-check"></i> AVAILABLE' : 'NOT AVAILABLE'}
+                                        </strong>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-subtle); padding-bottom: 0.3rem;">
+                                        <span style="color: var(--text-muted);">Daily Quota:</span>
+                                        <strong style="font-family: var(--font-mono); color: #fff;">${escapeHtml(quotaDisplay)}</strong>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-subtle); padding-bottom: 0.3rem;">
+                                        <span style="color: var(--text-muted);">Remaining:</span>
+                                        <strong style="font-family: var(--font-mono); color: var(--secondary);">${escapeHtml(String(remainingDisplay))}</strong>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border-subtle); padding-bottom: 0.3rem;">
+                                        <span style="color: var(--text-muted);">Latency:</span>
+                                        <strong style="font-family: var(--font-mono); color: #fff;">${escapeHtml(latencyDisplay)}</strong>
+                                    </div>
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span style="color: var(--text-muted);">Last Check:</span>
+                                        <span style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted);">${escapeHtml(lastCheckTime)}</span>
+                                    </div>
+                                    ${p.last_error ? `
+                                        <div style="margin-top: 0.4rem; padding: 0.4rem 0.6rem; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 4px; color: var(--danger); font-size: 0.72rem; word-break: break-all;">
+                                            <i class="fa-solid fa-triangle-exclamation"></i> ${escapeHtml(p.last_error)}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">
+                                <button class="btn btn-primary" id="btn-test-atom-connection" style="font-size: 0.8rem; width: 100%;">
+                                    <i class="fa-solid fa-bolt"></i> <span>TEST ATOM CONNECTION</span>
+                                </button>
+                                <button class="btn btn-secondary" id="btn-refresh-atom-card" style="font-size: 0.75rem; width: 100%;">
+                                    <i class="fa-solid fa-rotate-right"></i> <span>REFRESH STATUS</span>
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                const isOnline = p.status === 'ONLINE' || p.status === 'online' || p.status === 'healthy' || p.status === 'connected';
                 const statusDotClass = isOnline ? 'status-dot' : 'status-dot danger';
 
                 const modelsHtml = p.models ? p.models.map(m => `<span class="model-chip">${escapeHtml(m)}</span>`).join('') : '';
@@ -1389,8 +1853,15 @@
                         </div>
 
                         <div>
+                            ${p.models_count ? `
+                                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; margin-top:0.75rem;">Pool Scale</div>
+                                <div style="font-size:0.8rem; color:#fff; font-weight:600; margin-top:0.2rem;">
+                                    ${p.models_count} Models across ${p.active_family_count || 7} Families
+                                </div>
+                            ` : ''}
+
                             ${modelsHtml ? `
-                                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; margin-bottom:0.25rem;">Models Available</div>
+                                <div style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase; margin-top:0.5rem; margin-bottom:0.25rem;">Models Available</div>
                                 <div class="provider-models-list">${modelsHtml}</div>
                             ` : ''}
 
@@ -1403,6 +1874,34 @@
                     </div>
                 `;
             }).join('');
+
+            // Wire Atom test button
+            const testAtomBtn = document.getElementById('btn-test-atom-connection');
+            if (testAtomBtn) {
+                testAtomBtn.addEventListener('click', async () => {
+                    testAtomBtn.disabled = true;
+                    testAtomBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>TESTING ATOM...</span>';
+                    try {
+                        const tRes = await fetch('/api/providers/atom/test', { method: 'POST' });
+                        const tData = await tRes.json();
+                        if (tData.success) {
+                            showToast('ATOM CONNECTED: Official Appraisal API responding normally', 'success');
+                        } else {
+                            const errReason = (tData.health && tData.health.last_error) || (tData.health && tData.health.status) || 'Connection failed';
+                            showToast(`ATOM NOT CONNECTED: ${errReason}`, 'error');
+                        }
+                    } catch (e) {
+                        showToast(`Atom test error: ${e.message}`, 'error');
+                    } finally {
+                        await loadProvidersData();
+                    }
+                });
+            }
+
+            const refreshAtomBtn = document.getElementById('btn-refresh-atom-card');
+            if (refreshAtomBtn) {
+                refreshAtomBtn.addEventListener('click', loadProvidersData);
+            }
         } catch (err) {
             container.innerHTML = `<div style="grid-column: 1/-1; color: var(--danger); text-align: center;">Failed to load providers: ${escapeHtml(err.message)}</div>`;
         }
@@ -1558,15 +2057,30 @@
         const trendVal = (fScores.trend !== undefined) ? Number(fScores.trend).toFixed(1) : (d.trend_score !== undefined ? Number(d.trend_score).toFixed(1) : (qBreakdown.trend || '-'));
         const commVal = (fScores.commercial !== undefined) ? Number(fScores.commercial).toFixed(1) : (d.commercial_score !== undefined ? Number(d.commercial_score).toFixed(1) : (qBreakdown.commercial || '-'));
 
-        document.getElementById('modal-domain-name').innerText = name;
-        document.getElementById('modal-score-overall').innerText = qScore;
-        document.getElementById('modal-score-brand').innerText = brandVal;
-        document.getElementById('modal-score-trend').innerText = trendVal;
-        document.getElementById('modal-score-comm').innerText = commVal;
+        const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+
+        // 1. Internal Quality Evidence
+        const pronVal = d.pronunciation_score !== undefined ? Number(d.pronunciation_score).toFixed(1) : (fScores.pronunciation !== undefined ? Number(fScores.pronunciation).toFixed(1) : (qBreakdown.pronunciation || '-'));
+        const h2sVal = d.spelling_score !== undefined ? Number(d.spelling_score).toFixed(1) : (d.hear_to_spell_score !== undefined ? Number(d.hear_to_spell_score).toFixed(1) : (fScores.simplicity !== undefined ? Number(fScores.simplicity).toFixed(1) : '-'));
+        const anchorVal = d.semantic_anchor_score !== undefined ? Number(d.semantic_anchor_score).toFixed(1) : (d.anchor_strength !== undefined ? Number(d.anchor_strength).toFixed(1) : '-');
+        const breadthVal = d.buyer_breadth_score !== undefined ? Number(d.buyer_breadth_score).toFixed(1) : (d.buyer_breadth !== undefined ? Number(d.buyer_breadth).toFixed(1) : '-');
+        const inventedVal = d.coined_intentionality !== undefined ? Number(d.coined_intentionality).toFixed(1) : (d.invented_quality !== undefined ? Number(d.invented_quality).toFixed(1) : (d.invented_anchoring_tier || '-'));
+
+        setTxt('modal-domain-name', name);
+        setTxt('modal-score-overall', qScore);
+        setTxt('modal-score-brand', brandVal);
+        setTxt('modal-score-pron', pronVal);
+        setTxt('modal-score-h2s', h2sVal);
+        setTxt('modal-score-anchor', anchorVal);
+        setTxt('modal-score-comm', commVal);
+        setTxt('modal-score-breadth', breadthVal);
+        setTxt('modal-score-invented', inventedVal);
+        setTxt('modal-score-trend', trendVal);
+
         const trustModal = getProviderTrustBadge(d);
-        document.getElementById('modal-verified-provider').innerText = trustModal.providerLabel;
-        document.getElementById('modal-concept-desc').innerText = d.category || d.reason || 'Verified available .com brandable tech domain.';
-        document.getElementById('modal-checked-at').innerText = formatDate(d.checked_at || d.created_at);
+        setTxt('modal-verified-provider', trustModal.providerLabel);
+        setTxt('modal-concept-desc', d.category || d.reason || 'Verified available .com brandable tech domain.');
+        setTxt('modal-checked-at', formatDate(d.checked_at || d.created_at));
 
         // Naming type badge
         const namingTypeElem = document.getElementById('modal-naming-type');
@@ -1582,25 +2096,47 @@
             tierEl.innerHTML = tier === 'TIER_A' ? '<i class="fa-solid fa-star"></i> TIER A: HIGH CONVICTION' : (tier === 'TIER_B' ? '<i class="fa-solid fa-bolt"></i> TIER B: STRONG' : '<i class="fa-solid fa-eye"></i> WATCHLIST');
         }
 
-        // Multi-model independent review
+        // 2. Multi-Model Independent Review
         const mm = d.multi_model_review || {};
         const mmConsensus = d.consensus || mm.consensus || {};
         const mmScore = (key, fallback='-') => {
             const value = mmConsensus[key];
             return value === undefined || value === null ? fallback : Number(value).toFixed(1);
         };
-        const mmSet = (id, value) => { const el = document.getElementById(id); if (el) el.innerText = value; };
-        mmSet('modal-mm-linguistic', mmScore('final_linguistic_quality', mmScore('linguistic_quality')));
-        mmSet('modal-mm-brand', mmScore('final_brand_quality', mmScore('brand_quality')));
-        mmSet('modal-mm-commercial', mmScore('final_commercial_quality', mmScore('commercial_quality')));
-        mmSet('modal-mm-red', mmScore('red_team_score'));
-        mmSet('modal-mm-consensus', mmScore('consensus_score'));
-        mmSet('modal-mm-confidence', 'Confidence: ' + mmScore('confidence', d.consensus_confidence !== undefined ? Number(d.consensus_confidence).toFixed(1) : '-'));
-        mmSet('modal-mm-strengths', Array.isArray(mmConsensus.major_strengths) && mmConsensus.major_strengths.length ? mmConsensus.major_strengths.join(' • ') : '-');
-        mmSet('modal-mm-weaknesses', Array.isArray(mmConsensus.major_weaknesses) && mmConsensus.major_weaknesses.length ? mmConsensus.major_weaknesses.join(' • ') : '-');
+        setTxt('modal-mm-linguistic', mmScore('final_linguistic_quality', mmScore('linguistic_quality', d.linguistic_quality !== undefined ? Number(d.linguistic_quality).toFixed(1) : '-')));
+        setTxt('modal-mm-brand', mmScore('final_brand_quality', mmScore('brand_quality', d.brand_quality !== undefined ? Number(d.brand_quality).toFixed(1) : '-')));
+        setTxt('modal-mm-commercial', mmScore('final_commercial_quality', mmScore('commercial_quality', d.commercial_quality !== undefined ? Number(d.commercial_quality).toFixed(1) : '-')));
+        setTxt('modal-mm-red', mmScore('red_team_score', d.red_team_risk !== undefined ? Number(d.red_team_risk).toFixed(1) : '-'));
+        setTxt('modal-mm-consensus', mmScore('consensus_score', d.consensus_score !== undefined ? Number(d.consensus_score).toFixed(1) : '-'));
+        setTxt('modal-mm-confidence', 'Confidence: ' + mmScore('confidence', d.consensus_confidence !== undefined ? Number(d.consensus_confidence).toFixed(1) : '-'));
+        setTxt('modal-mm-strengths', Array.isArray(mmConsensus.major_strengths) && mmConsensus.major_strengths.length ? mmConsensus.major_strengths.join(' • ') : (Array.isArray(d.consensus_strengths) && d.consensus_strengths.length ? d.consensus_strengths.join(' • ') : '-'));
+        setTxt('modal-mm-weaknesses', Array.isArray(mmConsensus.major_weaknesses) && mmConsensus.major_weaknesses.length ? mmConsensus.major_weaknesses.join(' • ') : (Array.isArray(d.consensus_weaknesses) && d.consensus_weaknesses.length ? d.consensus_weaknesses.join(' • ') : '-'));
         const redParsed = (d.red_team_judge && d.red_team_judge.parsed) || {};
-        const objections = redParsed.kill_reasons || redParsed.critical_objections || [];
-        mmSet('modal-mm-objections', Array.isArray(objections) && objections.length ? objections.join(' • ') : '-');
+        const objections = redParsed.kill_reasons || redParsed.critical_objections || d.red_team_kill_reasons || [];
+        setTxt('modal-mm-objections', Array.isArray(objections) && objections.length ? objections.join(' • ') : 'No critical objections');
+
+        // 3. External Market (Atom Appraisal)
+        const hasAtom = d.atom_status === 'SUCCESS' && d.atom_domain_score !== undefined && d.atom_domain_score !== null;
+        setTxt('modal-atom-domain-score', hasAtom ? `${Number(d.atom_domain_score).toFixed(1)} / 10` : 'UNVALIDATED');
+        setTxt('modal-atom-appraisal-val', d.atom_appraisal_value ? `$${Math.round(d.atom_appraisal_value).toLocaleString()}` : '-');
+        setTxt('modal-atom-norm-val', d.atom_appraisal_normalized !== undefined ? `${Number(d.atom_appraisal_normalized).toFixed(1)} / 100` : '-');
+        const atomBadge = document.getElementById('modal-atom-badge');
+        if (atomBadge) {
+            atomBadge.className = hasAtom ? 'status-pill available' : 'status-pill unknown';
+            atomBadge.innerText = hasAtom ? 'ATOM VALIDATED' : (d.atom_status || 'PENDING');
+        }
+        const posSignals = Array.isArray(d.atom_positive_signals) && d.atom_positive_signals.length ? d.atom_positive_signals : (Array.isArray(d.atom && d.atom.positive_signals) ? d.atom.positive_signals : []);
+        const negSignals = Array.isArray(d.atom_negative_signals) && d.atom_negative_signals.length ? d.atom_negative_signals : (Array.isArray(d.atom && d.atom.negative_signals) ? d.atom.negative_signals : []);
+        setTxt('modal-atom-pos-signals', posSignals.length ? posSignals.join(' • ') : 'None reported');
+        setTxt('modal-atom-neg-signals', negSignals.length ? negSignals.join(' • ') : 'None reported');
+
+        // 4. Calibration Analysis
+        setTxt('modal-calib-internal-score', qScore);
+        setTxt('modal-calib-atom-score', hasAtom ? `${(Number(d.atom_domain_score) * 10).toFixed(1)} / 100` : '-');
+        const gapVal = d.atom_calibration_gap !== undefined ? d.atom_calibration_gap : (d.atom && d.atom.gap !== undefined ? d.atom.gap : null);
+        setTxt('modal-calib-gap', gapVal !== null ? `Gap: ${gapVal > 0 ? '+' : ''}${Number(gapVal).toFixed(1)} pts` : 'Gap: N/A');
+        const calibFlags = Array.isArray(d.atom_calibration_flags) && d.atom_calibration_flags.length ? d.atom_calibration_flags : (Array.isArray(d.atom && d.atom.flags) ? d.atom.flags : []);
+        setTxt('modal-calib-flags', calibFlags.length ? calibFlags.join(', ') : 'NORMAL ALIGNMENT');
 
         // Opportunity & Model Preference Scores
         const oppScoreEl = document.getElementById('modal-opportunity-score');
@@ -1804,10 +2340,31 @@
             });
         }
 
+        // Atom Pre-Run Guard Modal Handlers
+        const atomGuardCancel = document.getElementById('btn-atom-guard-cancel');
+        const atomGuardClose = document.getElementById('atom-guard-close-btn');
+        const atomGuardProceed = document.getElementById('btn-atom-guard-proceed');
+        const atomGuardModal = document.getElementById('atom-guard-modal');
+
+        const closeAtomGuard = () => { if (atomGuardModal) atomGuardModal.classList.remove('active'); };
+        [atomGuardCancel, atomGuardClose].forEach(b => { if (b) b.addEventListener('click', closeAtomGuard); });
+        if (atomGuardProceed) {
+            atomGuardProceed.addEventListener('click', () => {
+                closeAtomGuard();
+                executeManualHunt();
+            });
+        }
+        if (atomGuardModal) {
+            atomGuardModal.addEventListener('click', (e) => {
+                if (e.target === atomGuardModal) closeAtomGuard();
+            });
+        }
+
         window.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closeDetailModal();
                 closeRejectionModal();
+                closeAtomGuard();
             }
         });
 
@@ -1942,9 +2499,51 @@
         const exportBtn = document.getElementById('btn-trigger-export');
         if (exportBtn) exportBtn.addEventListener('click', triggerExport);
 
-        // 15. Providers Refresh
+        // 15. Providers Refresh & Live Health Check
         const refreshProvidersBtn = document.getElementById('btn-refresh-providers');
-        if (refreshProvidersBtn) refreshProvidersBtn.addEventListener('click', loadProvidersData);
+        if (refreshProvidersBtn) {
+            refreshProvidersBtn.addEventListener('click', async () => {
+                refreshProvidersBtn.disabled = true;
+                refreshProvidersBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking Health...';
+                try {
+                    const res = await fetch('/api/providers/health/check', { method: 'POST' });
+                    const d = await res.json();
+                    if (d.success) {
+                        showToast('Infrastructure health check verified live connectivity', 'success');
+                    } else {
+                        showToast('Health check completed with warnings', 'warning');
+                    }
+                } catch (e) {
+                    showToast(`Health check error: ${e.message}`, 'error');
+                } finally {
+                    refreshProvidersBtn.disabled = false;
+                    refreshProvidersBtn.innerHTML = '<i class="fa-solid fa-rotate-right"></i> Check Health Now';
+                    await loadProvidersData();
+                }
+            });
+        }
+
+        // Family filter tabs for XKIRO Model Pool
+        const familyTabs = document.getElementById('family-filter-tabs');
+        if (familyTabs) {
+            familyTabs.querySelectorAll('.family-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    familyTabs.querySelectorAll('.family-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    currentFamilyFilter = tab.getAttribute('data-family') || 'ALL';
+                    renderModelPoolGrid();
+                });
+            });
+        }
+
+        // Model search input
+        const modelSearchInput = document.getElementById('model-search-input');
+        if (modelSearchInput) {
+            modelSearchInput.addEventListener('input', (e) => {
+                currentSearchQuery = e.target.value.trim();
+                renderModelPoolGrid();
+            });
+        }
 
         // 16. Logs Filter & Refresh
         const logsFilter = document.getElementById('logs-filter-input');

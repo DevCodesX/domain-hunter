@@ -227,7 +227,9 @@ def test_6_soft_penalty_tiers_distinct_and_gating():
         "invented_quality_tier": "EXTREMELY_WEAK",
         "invented_subtype": "UNANCHORED",
         "brandability_heuristic_score": 35.0,
-        "ip_risk_level": "LOW"
+        "ip_risk_level": "LOW",
+        "atom_status": "SUCCESS",
+        "atom_domain_score": 8.8
     }
     tier_ext_weak = QualityTierEngine.assign_tier(cand_ext_weak, opportunity_score=86.0)
     assert tier_ext_weak == "TIER_C", f"EXTREMELY_WEAK should be excluded from Tier A/B, got {tier_ext_weak}"
@@ -239,7 +241,9 @@ def test_6_soft_penalty_tiers_distinct_and_gating():
         "invented_quality_tier": "STRONG",
         "invented_subtype": "HYBRID_ANCHORED",
         "brandability_heuristic_score": 94.0,
-        "ip_risk_level": "LOW"
+        "ip_risk_level": "LOW",
+        "atom_status": "SUCCESS",
+        "atom_domain_score": 8.8
     }
     tier_strong = QualityTierEngine.assign_tier(cand_strong, opportunity_score=86.0)
     assert tier_strong == "TIER_A", f"STRONG should enter Tier A, got {tier_strong}"
@@ -251,7 +255,9 @@ def test_6_soft_penalty_tiers_distinct_and_gating():
         "invented_quality_tier": "WEAK",
         "invented_subtype": "UNANCHORED",
         "brandability_heuristic_score": 75.0,
-        "ip_risk_level": "LOW"
+        "ip_risk_level": "LOW",
+        "atom_status": "SUCCESS",
+        "atom_domain_score": 8.2
     }
     tier_weak = QualityTierEngine.assign_tier(cand_weak, opportunity_score=76.0)
     assert tier_weak == "TIER_B", f"WEAK should still be eligible on merit for Tier B, got {tier_weak}"
@@ -280,7 +286,9 @@ def test_7_weak_unanchored_invented_ratio_cap_only_on_unanchored_subset():
             "quality_score": 88,
             "overall_score": 88.0,
             "ip_risk_level": "LOW",
-            "availability_status": "AVAILABLE_STANDARD"
+            "availability_status": "AVAILABLE_STANDARD",
+            "atom_status": "SUCCESS",
+            "atom_domain_score": 8.8
         })
 
     # 5 WEAK unanchored candidates
@@ -295,7 +303,9 @@ def test_7_weak_unanchored_invented_ratio_cap_only_on_unanchored_subset():
             "quality_score": 84,  # High raw score to qualify for Tier A/B before ratio cap
             "overall_score": 84.0,
             "ip_risk_level": "LOW",
-            "availability_status": "AVAILABLE_STANDARD"
+            "availability_status": "AVAILABLE_STANDARD",
+            "atom_status": "SUCCESS",
+            "atom_domain_score": 8.2
         })
 
     # Total 10 candidates. Ratio cap is 15% (0.15).

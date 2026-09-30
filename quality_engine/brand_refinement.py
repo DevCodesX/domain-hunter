@@ -41,14 +41,27 @@ GENERIC_NOUNS: Set[str] = {
     "hub", "gate", "rail", "pipe", "box", "bay", "mesh", "helm", "beam", "byte"
 }
 
+TECH_PRESTIGE_ROOTS: Set[str] = {
+    "sync", "apex", "prime", "core", "flow", "pro", "max", "hyper", "super",
+    "cloud", "data", "host", "grid", "code", "link", "fast", "smart", "swift",
+    "pulse", "node", "mesh", "logic", "vault", "stack", "mind", "intel", "net",
+    "web", "dev", "tech", "scale", "craft", "haven", "peak", "summit", "alpha"
+}
+
+CONTRADICTORY_MODIFIERS: Set[str] = {
+    "low", "down", "less", "off", "sub", "under", "slow", "cold", "dull",
+    "drop", "lost", "late", "zero", "nil", "void", "bad", "pale", "dark"
+}
+
 # AI synthetic naming patterns (excessive sibilants, repetitive tech suffixes)
 AI_SYNTHETIC_SUFFIXES = ["ix", "ox", "ium", "ex", "ax", "tra", "ora", "ify", "iva", "vix"]
 
 
 class WordGlueDetector:
     """
-    Detects candidates that are merely two relevant words artificially glued together
+    Detects candidates that are merely two words artificially glued together
     (e.g., [generic adjective] + [generic noun] or [generic verb] + [generic noun])
+    or commercially contradictory constructs (e.g. sync+low, apex+low, prime+low)
     with little distinctive brand identity.
     """
 
@@ -63,14 +76,30 @@ class WordGlueDetector:
         part2 = ""
         penalty = 0
         reasons = []
+        extracted_components = []
 
-        # Check split positions between 3 and length - 3
+        # Check split positions between 3 and length - 2
         for split_pos in range(3, length - 2):
             w1 = label[:split_pos]
             w2 = label[split_pos:]
 
-            # Case A: Generic Adjective + Generic Noun (e.g. clear+tether, firm+clause, still+tether)
-            if w1 in GENERIC_ADJECTIVES and w2 in GENERIC_NOUNS:
+            # Track components if both are recognized words/roots
+            all_known = (w1 in GENERIC_ADJECTIVES or w1 in GENERIC_VERBS or w1 in GENERIC_NOUNS or w1 in TECH_PRESTIGE_ROOTS) and \
+                        (w2 in GENERIC_ADJECTIVES or w2 in GENERIC_VERBS or w2 in GENERIC_NOUNS or w2 in CONTRADICTORY_MODIFIERS)
+            if all_known and not extracted_components:
+                extracted_components = [w1, w2]
+
+            # Case 1: Contradictory / Negative commercial modifier (e.g. sync+low, apex+low, prime+low)
+            if w2 in CONTRADICTORY_MODIFIERS and (w1 in TECH_PRESTIGE_ROOTS or w1 in GENERIC_VERBS or w1 in GENERIC_ADJECTIVES or w1 in GENERIC_NOUNS):
+                detected = True
+                glue_type = "CONTRADICTORY_MODIFIER_GLUE"
+                part1, part2 = w1, w2
+                penalty = 38
+                reasons.append(f"Contradictory negative commercial modifier ('{w1}' + '{w2}') creates commercially undesirable brand")
+                break
+
+            # Case 2: Generic Adjective + Generic Noun (e.g. clear+tether, firm+clause, still+tether)
+            elif w1 in GENERIC_ADJECTIVES and w2 in GENERIC_NOUNS:
                 detected = True
                 glue_type = "ADJECTIVE_PLUS_NOUN"
                 part1, part2 = w1, w2
@@ -78,7 +107,7 @@ class WordGlueDetector:
                 reasons.append(f"Generic adjective+noun word glue ('{w1}' + '{w2}')")
                 break
 
-            # Case B: Generic Verb + Generic Noun (e.g. bind+rule, dock+term)
+            # Case 3: Generic Verb + Generic Noun (e.g. bind+rule, dock+term)
             elif w1 in GENERIC_VERBS and w2 in GENERIC_NOUNS:
                 detected = True
                 glue_type = "VERB_PLUS_NOUN"
@@ -87,13 +116,40 @@ class WordGlueDetector:
                 reasons.append(f"Generic verb+noun word glue ('{w1}' + '{w2}')")
                 break
 
-            # Case C: Generic Noun + Generic Noun with weak brand identity (e.g. dock+term)
+            # Case 4: Generic Noun + Generic Noun with weak brand identity (e.g. dock+term)
             elif w1 in GENERIC_NOUNS and w2 in GENERIC_NOUNS and w1 != w2:
                 detected = True
                 glue_type = "NOUN_PLUS_NOUN"
                 part1, part2 = w1, w2
                 penalty = 22
                 reasons.append(f"Generic dual-noun collision ('{w1}' + '{w2}')")
+                break
+
+            # Case 5: Verb + Adjective (e.g. sync+low)
+            elif w1 in GENERIC_VERBS and w2 in GENERIC_ADJECTIVES:
+                detected = True
+                glue_type = "VERB_PLUS_ADJECTIVE"
+                part1, part2 = w1, w2
+                penalty = 34
+                reasons.append(f"Unnatural verb+adjective compound ('{w1}' + '{w2}')")
+                break
+
+            # Case 6: Adjective + Adjective (e.g. prime+low)
+            elif w1 in GENERIC_ADJECTIVES and w2 in GENERIC_ADJECTIVES:
+                detected = True
+                glue_type = "ADJECTIVE_PLUS_ADJECTIVE"
+                part1, part2 = w1, w2
+                penalty = 30
+                reasons.append(f"Unnatural adjective+adjective collision ('{w1}' + '{w2}')")
+                break
+
+            # Case 7: Noun + Adjective (e.g. apex+low)
+            elif (w1 in GENERIC_NOUNS or w1 in TECH_PRESTIGE_ROOTS) and w2 in GENERIC_ADJECTIVES:
+                detected = True
+                glue_type = "NOUN_PLUS_ADJECTIVE"
+                part1, part2 = w1, w2
+                penalty = 32
+                reasons.append(f"Unnatural noun+adjective collision ('{w1}' + '{w2}')")
                 break
 
         # Check if either word is especially stale/overused in domain hunting
@@ -104,10 +160,11 @@ class WordGlueDetector:
                 reasons.append("Highly generic, literal domain-hunting construct")
                 break
 
+        final_components = [part1, part2] if detected else extracted_components
         return {
             "is_word_glue": detected,
             "glue_type": glue_type,
-            "components": [part1, part2] if detected else [],
+            "components": final_components,
             "word_glue_penalty": penalty,
             "reasons": reasons
         }
@@ -183,15 +240,19 @@ class CompoundNaturalnessScorer:
         if glue_info is None:
             glue_info = WordGlueDetector.detect_word_glue(label)
 
-        base_score = 85
+        is_glue = glue_info.get("is_word_glue", False)
+        base_score = 65 if is_glue else 85
         penalties = 0
         bonuses = 0
         reasons = []
 
         # 1. Apply word-glue penalty
-        if glue_info.get("is_word_glue"):
+        if is_glue:
             penalties += glue_info.get("word_glue_penalty", 25)
             reasons.extend(glue_info.get("reasons", []))
+            if glue_info.get("glue_type") == "CONTRADICTORY_MODIFIER_GLUE":
+                penalties += 20
+                reasons.append("Contradictory negative modifier heavily penalizes compound naturalness")
 
         # 2. Syllable & length balance
         # Great compounds typically have 2 words of roughly balanced length (e.g., 4+4, 4+5, 5+4)
@@ -220,7 +281,9 @@ class CompoundNaturalnessScorer:
             penalties += (length - 12) * 5
             reasons.append(f"Excessive compound length ({length} chars)")
 
-        score = max(20, min(98, base_score - penalties + bonuses))
+        score = max(15, min(98, base_score - penalties + bonuses))
+        if is_glue and glue_info.get("glue_type") == "CONTRADICTORY_MODIFIER_GLUE":
+            score = min(score, 38.0)
 
         return {
             "compound_naturalness_score": score,
@@ -241,7 +304,9 @@ class BuyerClarityScorer:
         cls,
         domain_or_label: str,
         market_category: str = "AI & Technology",
-        category_fit_scores: Optional[Dict[str, int]] = None
+        category_fit_scores: Optional[Dict[str, int]] = None,
+        invented_eval: Optional[Dict[str, Any]] = None,
+        naming_type: str = ""
     ) -> Dict[str, Any]:
         import hashlib
         label = domain_or_label.lower().replace(".com", "").strip()
@@ -290,17 +355,33 @@ class BuyerClarityScorer:
         matched_data = industry_archetypes.get(market_category, industry_archetypes["AI & Technology"])
         industries, default_fit = matched_data
 
-        # 1. Base commercial credibility by length
-        if 4 <= n <= 6:
-            base = 82.0 + (6 - n) * 2.2
-        elif n == 7:
-            base = 81.5
-        elif n == 8:
-            base = 78.0
-        elif n <= 10:
-            base = 72.0 - (n - 8) * 3.5
+        # 1. Base commercial credibility by evidence (Part L - neutral baseline, not 80s for random 4-6 chars)
+        is_invented = (naming_type == "INVENTED") or (invented_eval is not None)
+        inv_sub = invented_eval.get("invented_subtype") if invented_eval else None
+        inv_tier = invented_eval.get("invented_quality_tier") if invented_eval else None
+
+        if is_invented:
+            if inv_sub == "UNANCHORED" or inv_tier == "EXTREMELY_WEAK":
+                base = 48.0  # Neutral baseline for unanchored invented strings
+            elif inv_tier == "STRONG" or inv_sub == "HYBRID_ANCHORED":
+                base = 66.0
+            elif inv_sub in ["LEXICAL_ANCHORED", "SEMANTIC_ANCHORED"]:
+                base = 60.0
+            else:
+                base = 54.0
         else:
-            base = max(45.0, 65.0 - (n - 10) * 4.0)
+            base = 65.0  # Established baseline for authentic words/compounds
+
+        # Length is a supporting feature (up to 4.5 pts max), NOT starting commercial signal
+        if 5 <= n <= 7:
+            len_bonus = (7 - n + 1) * 1.5 if not (is_invented and inv_sub == "UNANCHORED") else 1.5
+            base += min(4.5, len_bonus)
+        elif n <= 4:
+            base += 2.0 if not (is_invented and inv_sub == "UNANCHORED") else 0.5
+        elif n <= 10:
+            base -= (n - 8) * 2.5
+        else:
+            base = max(35.0, base - (n - 10) * 4.0)
 
         # 2. Category baseline
         cat_bonuses = {
@@ -319,7 +400,7 @@ class BuyerClarityScorer:
             "intel", "model", "mind", "base", "hub", "box", "net", "web", "code", "dev"
         }
         kw_matches = sum(1 for kw in COMMERCIAL_KEYWORDS if kw in label)
-        base += min(12.0, kw_matches * 5.0)
+        base += min(14.0, kw_matches * 6.0)
 
         # 4. Professional endings vs awkward clusters
         authoritative_endings = ("ic", "is", "ex", "ix", "or", "us", "en", "on", "er", "ium", "os", "al", "a", "o")
@@ -328,17 +409,30 @@ class BuyerClarityScorer:
         elif label.endswith(("lux", "vos", "ync", "vio", "tra", "tix")):
             base -= 2.2
 
+        # Harsh consonant clusters
         harsh_pairs = {"zt", "fq", "gq", "zk", "xz", "zx", "jx", "xj", "vj", "jv", "qp"}
         harsh_pen = sum(10.0 for i in range(n - 1) if label[i:i+2] in harsh_pairs)
         if "q" in label and "qu" not in label:
             harsh_pen += 12.0
         base -= harsh_pen
 
+        # Unanchored penalty if no commercial root evidence
+        if is_invented and inv_sub == "UNANCHORED" and kw_matches == 0:
+            base -= 6.0
+
+        # Word-glue / Contradictory modifier penalty on commercial buyer clarity
+        glue_res = WordGlueDetector.detect_word_glue(label)
+        if glue_res.get("is_word_glue"):
+            if glue_res.get("glue_type") == "CONTRADICTORY_MODIFIER_GLUE":
+                base -= 28.0
+            else:
+                base -= 16.0
+
         # Fine deterministic string variance (0.001 - 1.999 pts) to guarantee unique scores
         h = (int(hashlib.sha256(label.encode("utf-8")).hexdigest()[6:12], 16) / 0xFFFFFF) * 2.0
         base += h
 
-        score = round(max(30.0, min(97.0, base)), 3)
+        score = round(max(25.0, min(97.0, base)), 3)
         buyer_count = 4 if score >= 85 else (3 if score >= 70 else 2)
 
         return {
@@ -348,6 +442,7 @@ class BuyerClarityScorer:
             "buyer_industries": industries,
             "startup_fit": f"{default_fit} ({market_category})"
         }
+
 
 
 class CandidateTrendFitScorer:
@@ -363,7 +458,8 @@ class CandidateTrendFitScorer:
         domain_or_label: str,
         concept: str,
         concept_trend_relevance: float = 85.0,
-        market_category: str = "AI & Technology"
+        market_category: str = "AI & Technology",
+        is_unanchored_invented: bool = False
     ) -> Dict[str, Any]:
         import hashlib
         label = domain_or_label.lower().replace(".com", "").strip()
@@ -400,20 +496,38 @@ class CandidateTrendFitScorer:
         if "q" in label and "qu" not in label:
             harsh_pen += 16.0
 
+        # Check compound tech mismatch (e.g. nodeshade: node=tech, shade=non-tech)
+        has_compound_tech_mismatch = False
+        for sp in range(3, n - 2):
+            w1 = label[:sp]
+            w2 = label[sp:]
+            if (w1 in modern_tech_roots and w2 not in modern_tech_roots and w2 not in concept_words) or \
+               (w2 in modern_tech_roots and w1 not in modern_tech_roots and w1 not in concept_words):
+                has_compound_tech_mismatch = True
+                break
+
         if exact_matches >= 1:
             base = 82.0 + (exact_matches * 6.0)
         elif partial_matches >= 1:
             base = 74.0 + (partial_matches * 4.0)
         elif root_score > 0:
-            base = 68.0 + root_score
+            if has_compound_tech_mismatch:
+                # Single tech root inside an otherwise non-tech compound receives discounted fit
+                base = min(74.0, 58.0 + (root_score * 0.70))
+            else:
+                base = 68.0 + root_score
         else:
-            base = 52.0 + (tech_sound_ratio * 26.0)
+            if is_unanchored_invented:
+                # Part M: Cap candidate trend relevance for unanchored invented names with no concept/root overlap
+                base = 32.0 + (tech_sound_ratio * 10.0)
+            else:
+                base = 52.0 + (tech_sound_ratio * 26.0)
 
         # Length curve
         if 5 <= n <= 7:
-            base += 4.5
+            base += 4.5 if not is_unanchored_invented else 1.5
         elif n <= 4:
-            base += 2.0
+            base += 2.0 if not is_unanchored_invented else 0.5
         elif n >= 10:
             base -= (n - 9) * 3.5
 
@@ -423,10 +537,19 @@ class CandidateTrendFitScorer:
         h = (int(hashlib.sha256(label.encode("utf-8")).hexdigest()[:6], 16) / 0xFFFFFF) * 2.0
         base += h
 
-        candidate_trend_fit_score = round(max(35.0, min(98.5, base)), 3)
+        if is_unanchored_invented and exact_matches == 0 and partial_matches == 0 and root_score == 0:
+            # Enforce Part M cap for unanchored invented strings with no opportunity alignment
+            candidate_trend_fit_score = round(max(25.0, min(40.0, base)), 3)
+        elif has_compound_tech_mismatch and exact_matches == 0:
+            candidate_trend_fit_score = round(max(25.0, min(74.0, base)), 3)
+        else:
+            candidate_trend_fit_score = round(max(30.0, min(98.5, base)), 3)
 
         # Blended trend score (blends macro concept opportunity with candidate's specific fit)
-        blended_trend_score = round((concept_trend_score * 0.25) + (candidate_trend_fit_score * 0.75), 3)
+        if has_compound_tech_mismatch and exact_matches == 0:
+            blended_trend_score = round(min(75.0, (concept_trend_score * 0.20) + (candidate_trend_fit_score * 0.80)), 3)
+        else:
+            blended_trend_score = round((concept_trend_score * 0.25) + (candidate_trend_fit_score * 0.75), 3)
 
         return {
             "concept_trend_score": concept_trend_score,

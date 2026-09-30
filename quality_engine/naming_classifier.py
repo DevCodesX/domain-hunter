@@ -60,6 +60,26 @@ KNOWN_FOREIGN_ROOTS = {
     "zen", "kaizen", "sora", "kumo", "dharma", "karma", "prana"
 }
 
+FOREIGN_ROOT_LANGUAGES = {
+    # Latin / Classical
+    "veritas": "Latin", "celer": "Latin", "fidelis": "Latin", "solum": "Latin", "valere": "Latin", "audax": "Latin", "motus": "Latin", "ordo": "Latin", "radix": "Latin",
+    "clarus": "Latin", "firmus": "Latin", "rectus": "Latin", "vindex": "Latin", "opus": "Latin", "vectis": "Latin", "lex": "Latin", "axis": "Latin", "statera": "Latin",
+    "tutela": "Latin", "custos": "Latin", "fiducia": "Latin", "pacta": "Latin", "norma": "Latin", "jura": "Latin", "aequitas": "Latin", "verus": "Latin", "sanctio": "Latin",
+    "forma": "Latin", "certo": "Latin", "proba": "Latin", "recta": "Latin", "clario": "Latin", "valida": "Latin", "kleros": "Latin", "celeris": "Latin", "fluxus": "Latin",
+    "rivus": "Latin", "nodus": "Latin", "lumen": "Latin", "novus": "Latin", "agilis": "Latin", "fortis": "Latin", "faber": "Latin", "tenax": "Latin", "prisma": "Latin",
+    "thalweg": "German", "caldera": "Spanish", "strata": "Latin", "fulcrum": "Latin", "rhizome": "Greek", "aurum": "Latin", "terra": "Latin", "modus": "Latin",
+    # Italian / Spanish / Romance
+    "volo": "Italian", "vivo": "Spanish", "faro": "Spanish", "bravo": "Italian", "senso": "Italian", "primo": "Italian", "curia": "Latin", "onda": "Spanish", "brio": "Italian", "cima": "Italian",
+    "puro": "Spanish", "clair": "French", "elan": "French", "vigie": "French", "pivot": "French", "sora": "Japanese", "vita": "Italian", "vero": "Italian",
+    # Greek
+    "chronos": "Greek", "kairos": "Greek", "kratos": "Greek", "logos": "Greek", "telos": "Greek", "axon": "Greek", "synapse": "Greek", "dendrite": "Greek", "kortex": "Greek",
+    "azimuth": "Arabic", "astrolabe": "Greek", "kinesis": "Greek", "noema": "Greek", "techne": "Greek", "phronesis": "Greek",
+    # German / Nordic
+    "kraft": "German", "stark": "German", "fjord": "Nordic", "malm": "Nordic", "nord": "Nordic",
+    # Japanese / Sanskrit
+    "zen": "Japanese", "kaizen": "Japanese", "kumo": "Japanese", "dharma": "Sanskrit", "karma": "Sanskrit", "prana": "Sanskrit"
+}
+
 EVOCATIVE_SEMANTIC_ROOTS = {
     "aura", "wave", "loom", "grid", "pulse", "spark", "crest", "beacon", "orbit",
     "nexus", "stride", "flair", "haven", "zenith", "vertex", "tensor", "anchor"
@@ -135,12 +155,14 @@ class NamingTypeClassifier:
                 "components": [domain]
             }
 
-        # 3. Check for recognized FOREIGN_WORD (classical or foreign root)
+        # 3. Check for recognized REAL_FOREIGN_WORD (classical or foreign root)
         if domain in KNOWN_FOREIGN_ROOTS:
+            lang = FOREIGN_ROOT_LANGUAGES.get(domain, "Latin")
             return {
-                "naming_type": "FOREIGN_WORD",
+                "naming_type": "REAL_FOREIGN_WORD",
+                "source_language": lang,
                 "confidence": 0.92,
-                "reason": f"Classical / foreign linguistic root ('{domain}')",
+                "reason": f"Classical / foreign linguistic root ('{domain}', {lang})",
                 "components": [domain]
             }
 

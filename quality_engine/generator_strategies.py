@@ -113,6 +113,12 @@ class NamingStrategyGenerator:
                 # Basic sanity
                 label = domain[:-4]
                 if len(label) >= 2 and label not in seen and re.match(r"^[a-z0-9-]+$", label):
+                    # Disallow contradictory modifiers in generated compound names (e.g. synclow, apexlow, primelow)
+                    if strategy == "COMPOUND":
+                        from quality_engine.brand_refinement import CONTRADICTORY_MODIFIERS
+                        if any(label.endswith(mod) and len(label) > len(mod) + 2 for mod in CONTRADICTORY_MODIFIERS):
+                            continue
+
                     seen.add(label)
                     template = MorphologyClassifier.infer_template(label)
                     records.append({
@@ -149,14 +155,15 @@ Category: "{category}"
 
 Generate high-potential ONE-WORD .com domains relevant to this concept.
 Requirements:
-1. Output three classes of single-word opportunities:
+1. Output authentic single-word opportunities:
    a) Rare, evocative, authentic single English words (nouns, verbs, adjectives from science, architecture, geology, botany, navigation: e.g. caldera, strata, tessera, spindle, spire, thalweg, solstice, paragon, meridian, fulcrum, bastion, zenith, keystone, cipher, haven, forge).
-   b) Crisp, unified 5-7 letter single-word brandables with natural phonetic morphology (like Figma, Stripe, Canva, Vercel, Zapier, Miro, Retool, Twilio, Asana). Single unified phonetics, NOT two glued words!
-   c) Classical/evocative Latin, Greek, Spanish, Italian, or Nordic single root words (like Lumina, Novus, Velox, Tenor, Kumo, Sora, Solana, Prisma).
+   b) Crisp, authentic dictionary words with strong metaphorical and commercial resonance.
+   c) Classical/evocative Latin, Greek, Spanish, Italian, or Nordic single root words that exist as valid standalone terms (like Lumina, Novus, Velox, Tenor, Kumo, Sora, Solana, Prisma).
 2. CRITICAL ANTI-SATURATION RULES:
    - DO NOT repeat prefixes like 'sdk*', 'agen*', 'auth*', 'flow*'.
    - DO NOT repeat synthetic suffixes like '*-lux', '*-vos', '*-vera', '*-vio', '*-ync'.
    - DO NOT output generic word-glue compounds (e.g. no 'clear+tether', 'firm+clause', 'bind+rule').
+   - DO NOT output coined or invented brand names (e.g. no Figma, Canva, Zillow, Zapier) - this strategy is strictly for REAL SINGLE WORDS.
 3. Every candidate MUST be a single clean word before .com.
 4. Output {target_count} candidates as a comma-separated list of lowercase .com domains.
 No numbering or markdown.
@@ -169,16 +176,23 @@ No numbering or markdown.
             logger.warning(f"AI ONE_WORD generation error: {e}, falling back to curated dictionary seeds")
             candidates = []
 
-        # Algorithmic augmentation if needed with diverse one-words
+        # Algorithmic augmentation if needed with verified authentic one-words
         if len(candidates) < target_count // 2:
             from quality_engine.morphology_classifier import MorphologyClassifier
+            from quality_engine.one_word_engine import OneWordQualityEngine
+            one_word_engine = OneWordQualityEngine()
             now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
             active_batch = batch_id or f"batch_{int(time.time())}"
             import random
             shuffled_seeds = list(HIGH_VALUE_ONE_WORDS)
             random.seed(42)
             random.shuffle(shuffled_seeds)
-            for seed in shuffled_seeds[:target_count]:
+            for seed in shuffled_seeds:
+                if len(candidates) >= target_count:
+                    break
+                is_dict, _ = one_word_engine.is_dictionary_word(seed)
+                if not is_dict:
+                    continue
                 candidates.append({
                     "domain": f"{seed}.com",
                     "generation_strategy": "ONE_WORD",
@@ -214,9 +228,10 @@ Category: "{category}"
 Generate creative, premium COMPOUND .com domains formed by fusing two high-synergy words with natural brand rhythm (like Coinbase, DoorDash, Ironclad, Cloudflare, Datadog).
 CRITICAL RULES:
 1. STRICT ANTI-GLUE RULE: DO NOT generate generic adjective+noun or verb+noun word-glue (e.g. DO NOT produce clear+tether, firm+clause, bind+rule, dock+term, still+tether, citadel+pact).
-2. STRICT ANTI-SATURATION RULE: DO NOT repeat prefixes across candidates (e.g. max 1 domain starting with any given prefix).
-3. Words must have natural semantic synergy, great rhythm, and balanced syllable lengths (under 12 characters total before .com).
-4. Output {target_count} candidates as a comma-separated list of lowercase .com domains.
+2. STRICT ANTI-CONTRADICTORY RULE: DO NOT append negative or downgrade modifiers (e.g. low, down, less, off, slow, sub, under, dull). Domains like synclow, apexlow, primelow are strictly forbidden.
+3. STRICT ANTI-SATURATION RULE: DO NOT repeat prefixes across candidates (e.g. max 1 domain starting with any given prefix).
+4. Words must have natural semantic synergy, great rhythm, and balanced syllable lengths (under 12 characters total before .com).
+5. Output {target_count} candidates as a comma-separated list of lowercase .com domains.
 No numbering or markdown.
 """
         model_name = "router/domain_generation"
@@ -266,56 +281,20 @@ No numbering or markdown.
         keywords: Optional[List[str]] = None,
         batch_id: str = ""
     ) -> List[Dict[str, Any]]:
-        """Strategy C: INVENTED (Neologisms & Blends)"""
-        prompt = f"""
-You are an expert in phonetic neologisms and invented brand names (like Spotify, Figma, Zillow, Stripe, Canva).
-Concept: "{concept}"
-Category: "{category}"
-
-Generate high-appeal, phonetically harmonious INVENTED brand names ending in .com.
-Requirements:
-1. Invented, novel words that sound authentic, modern, and trustworthy.
-2. CRITICAL ANTI-SATURATION RULES:
-   - DO NOT repeat prefixes like 'sdk*', 'agen*', 'auth*'.
-   - DO NOT repeat synthetic suffixes like '*-lux', '*-vos', '*-vera', '*-vio', '*-ync', '*-tra'.
-   - DO NOT repeat identical syllable templates (no masvera, capevio, toovira, trezync).
-   - Every candidate must have a DISTINCT acoustic shape.
-3. Excellent vowel/consonant balance (easy to spell and pronounce).
-4. 5 to 9 characters length.
-5. Output {target_count} candidates as a comma-separated list of lowercase .com domains.
-No numbering or markdown.
-"""
-        model_name = "router/domain_generation"
-        try:
-            raw_text = await self.router.execute_task("domain_generation", prompt, temperature=0.8, max_tokens=1200)
-            candidates = self._clean_candidates(raw_text, "INVENTED", concept, model_name, category, keywords, batch_id)
-        except Exception as e:
-            logger.warning(f"AI INVENTED generation error: {e}")
-            candidates = []
-
-        if len(candidates) < target_count // 2:
-            from quality_engine.morphology_classifier import MorphologyClassifier
-            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            active_batch = batch_id or f"batch_{int(time.time())}"
-            for prefix, suffix in INVENTIVE_MORPHEMES:
-                cand_label = f"{prefix}{suffix}"
-                candidates.append({
-                    "domain": f"{cand_label}.com",
-                    "generation_strategy": "INVENTED",
-                    "generation_model": "phonetic_neologism_engine",
-                    "generator_model": "phonetic_neologism_engine",
-                    "generation_prompt_version": "v2.75b",
-                    "semantic_concept": concept,
-                    "source_concept": concept,
-                    "source_category": category,
-                    "market_category": category,
-                    "source_keywords": keywords or [],
-                    "naming_template": MorphologyClassifier.infer_template(cand_label),
-                    "language": "en",
-                    "generation_batch_id": active_batch,
-                    "generation_timestamp": now_iso
-                })
-        return candidates
+        """Strategy C: INVENTED (Neologisms & Blends) routed to canonical InventedBrandEngine"""
+        cands = await self.multi_engine.invented_engine.generate(concept, category, count=target_count)
+        active_batch = batch_id or f"batch_{int(time.time())}"
+        from quality_engine.morphology_classifier import MorphologyClassifier
+        for c in cands:
+            label = c["domain"][:-4]
+            c.setdefault("semantic_concept", concept)
+            c.setdefault("source_keywords", keywords or [])
+            c.setdefault("generation_model", c.get("generator_model", "invented_brand_engine"))
+            c.setdefault("generation_prompt_version", "v2.75b")
+            c.setdefault("naming_template", MorphologyClassifier.infer_template(label))
+            c.setdefault("language", "en")
+            c.setdefault("generation_batch_id", active_batch)
+        return cands
 
     async def generate_semantic_brandable(
         self,

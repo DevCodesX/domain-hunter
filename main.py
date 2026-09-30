@@ -34,6 +34,10 @@ from availability import (
 )
 from quality_engine.config import get_quality_weights, DEFAULT_STRATEGY_TARGETS, MIN_QUALITY_SCORE
 from risk_engine.models import RiskLevel
+from services.atom_appraisal_service import (
+    AtomAppraisalService,
+    AtomProviderHealthStatus
+)
 from learning_engine import (
     LearningStore,
     TrainingFeaturePipeline,
@@ -110,6 +114,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 http_client = httpx.AsyncClient(timeout=15.0)
 availability_engine = AvailabilityEngine(http_client)
+atom_service = AtomAppraisalService.get_instance(http_client=http_client)
 scheduler = None
 job_runner = None
 
@@ -124,12 +129,13 @@ async def check_domains_availability(domains: list[str]) -> dict:
 @app.on_event("startup")
 async def startup_event():
     global scheduler, job_runner
-    scheduler, job_runner = setup_scheduler(router, http_client, availability_engine)
+    scheduler, job_runner = setup_scheduler(router, http_client, availability_engine, atom_service=atom_service)
 
 @app.on_event("shutdown")
 async def shutdown_event():
     await http_client.aclose()
     await router.client.aclose()
+    await atom_service.aclose()
     if scheduler:
         scheduler.shutdown()
 
@@ -154,7 +160,73 @@ async def health_check():
 @app.get("/api/health/providers")
 async def health_providers():
     intel_health = router.intelligence.get_providers_health()
+    atom_health = atom_service.get_health_status()
+    pool_health = router.get_model_pool_health()
+    capability_routing = router.get_capability_routing_summary()
+    
+    # Calculate truthful model status counts (Requirement 7)
+    xkiro_has_key = bool(os.getenv("XKIRO_API_KEY") and not str(os.getenv("XKIRO_API_KEY")).startswith("ضع"))
+    online_count = sum(1 for m in pool_health if m.get("status") == "ONLINE")
+    degraded_count = sum(1 for m in pool_health if m.get("status") == "DEGRADED")
+    timeout_count = sum(1 for m in pool_health if m.get("status") == "TIMEOUT")
+    rate_limited_count = sum(1 for m in pool_health if m.get("status") in ["RATE_LIMITED", "RATE LIMITED"])
+    error_count = sum(1 for m in pool_health if m.get("status") in ["ERROR", "UNAVAILABLE"])
+    not_configured_count = sum(1 for m in pool_health if m.get("status") in ["NOT_CONFIGURED", "NOT CONFIGURED"])
+    standby_count = sum(1 for m in pool_health if m.get("status") == "STANDBY")
+    total_models = len(pool_health)
+
+    if not xkiro_has_key:
+        xkiro_status = "NOT CONFIGURED"
+    elif online_count == total_models and total_models > 0:
+        xkiro_status = "ONLINE"
+    elif online_count > 0:
+        xkiro_status = f"PARTIAL ({online_count}/{total_models} ONLINE)"
+    else:
+        xkiro_status = "STANDBY"
+    
     providers_info = {
+        "atom": {
+            "name": "Atom Domain Appraisal",
+            "provider": "ATOM",
+            "status": atom_health.get("status", "NOT_CONFIGURED"),
+            "enabled": atom_health.get("enabled", True),
+            "configured": atom_health.get("configured", False),
+            "reachable": atom_health.get("reachable", False),
+            "authenticated": atom_health.get("authenticated", False),
+            "appraisal_scope_available": atom_health.get("appraisal_scope_available", False),
+            "latency_ms": atom_health.get("latency_ms"),
+            "daily_limit": atom_health.get("daily_limit"),
+            "used_today": atom_health.get("used_today", 0),
+            "remaining_today": atom_health.get("remaining_today"),
+            "last_success_at": atom_health.get("last_success_at"),
+            "last_error_at": atom_health.get("last_error_at"),
+            "last_error": atom_health.get("last_error"),
+            "type": "market_appraisal",
+            "role": "Official Authoritative Atom Domain Appraisal & Market Evaluation"
+        },
+        "xkiro": {
+            "name": "xKiro Multi-Model Free AI Pool",
+            "status": xkiro_status,
+            "models_count": total_models,
+            "online_count": online_count,
+            "standby_count": standby_count,
+            "rate_limited_count": rate_limited_count,
+            "error_count": error_count,
+            "timeout_count": timeout_count,
+            "active_family_count": len(set(m.get("family") for m in pool_health)),
+            "roles": [
+                "Domain Generation",
+                "Linguistic Judge",
+                "Brand Strategy Judge",
+                "Commercial / Buyer Judge",
+                "Red Team Critic",
+                "Consensus Arbiter",
+                "Fast Screen",
+                "Multilingual"
+            ],
+            "concurrency": int(os.getenv("XKIRO_CONCURRENCY", "5")),
+            "stats": intel_health.get("xkiro", {})
+        },
         "nvidia": {
             "name": "NVIDIA NIM",
             "status": "online" if os.getenv("NVIDIA_API_KEY") else "unconfigured",
@@ -162,14 +234,6 @@ async def health_providers():
             "roles": ["Trend Research", "Brandability", "Final Scoring"],
             "concurrency": int(os.getenv("NVIDIA_CONCURRENCY", "5")),
             "stats": intel_health.get("nvidia", {})
-        },
-        "xkiro": {
-            "name": "xKiro AI",
-            "status": "online" if os.getenv("XKIRO_API_KEY") else "unconfigured",
-            "models": ["qwen/qwen3.8-max:free"],
-            "roles": ["Domain Generation", "Candidate Judge"],
-            "concurrency": int(os.getenv("XKIRO_CONCURRENCY", "5")),
-            "stats": intel_health.get("xkiro", {})
         },
         "openrouter": {
             "name": "OpenRouter Gateway",
@@ -204,7 +268,56 @@ async def health_providers():
         "status": "ok",
         "providers": intel_health,
         "providers_info": providers_info,
+        "atom_health": atom_health,
+        "xkiro_model_pool": pool_health,
+        "capability_routing": capability_routing,
         "availability_provider": "verisign_rdap"
+    }
+
+class TestModelRequest(BaseModel):
+    provider: str = "xkiro"
+    model: str
+
+@app.post("/api/providers/model/test")
+async def test_single_model(req: TestModelRequest):
+    """
+    Section 16: Test individual model connectivity and latency on-demand.
+    Never exposes API secrets or internal keys.
+    """
+    res = await router.test_model(req.provider, req.model)
+    return {
+        "success": res.get("status") == "ONLINE",
+        "result": res
+    }
+
+@app.post("/api/providers/health/check")
+async def check_all_providers_health():
+    """
+    Section 16: Check Health Now.
+    Performs minimal real connectivity check on primary configured models and Atom.
+    Avoids flooding all 57 models.
+    """
+    model_results = await router.check_configured_models_health()
+    atom_health = await atom_service.check_health(force=True)
+    return {
+        "success": True,
+        "models": model_results,
+        "atom": atom_health.to_dict(),
+        "pool": router.get_model_pool_health(),
+        "capability_routing": router.get_capability_routing_summary()
+    }
+
+@app.post("/api/providers/atom/test")
+async def test_atom_provider():
+    """
+    Part 5 & 34: Test Atom Connection.
+    Performs a real lightweight health check against Atom appraisal API.
+    Never exposes secrets or credentials in logs or response.
+    """
+    health = await atom_service.check_health(force=True)
+    return {
+        "success": health.status == AtomProviderHealthStatus.CONNECTED.value,
+        "health": health.to_dict()
     }
 
 @app.get("/api/logs")
@@ -240,6 +353,16 @@ async def get_settings():
             "curated_brands_count": 60,
             "risk_levels": ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
             "critical_risk_rejection": True
+        },
+        "atom": {
+            "required_for_final": os.getenv("ATOM_REQUIRED_FOR_FINAL", "true").lower() == "true",
+            "min_domain_score": float(os.getenv("ATOM_MIN_DOMAIN_SCORE", "8.0")),
+            "tier_a_min_score": float(os.getenv("ATOM_TIER_A_MIN_DOMAIN_SCORE", "8.5")),
+            "review_range_min": float(os.getenv("ATOM_REVIEW_RANGE_MIN", "7.0")),
+            "max_appraisals_per_run": int(os.getenv("ATOM_MAX_APPRAISALS_PER_RUN", "10")),
+            "cache_ttl_hours": int(os.getenv("ATOM_CACHE_TTL_HOURS", "24")),
+            "configured": atom_service.is_configured(),
+            "status": atom_service.health.status
         },
         "system": {
             "app_name": "Domain Hunter",
@@ -310,13 +433,32 @@ async def get_latest_domains():
                     return False
                 if is_production_mode() and prov not in REAL_REGISTRY_PROVIDERS:
                     return False
-                return (
+                if not (
                     d.get("availability_status") == "AVAILABLE_STANDARD"
                     and not d.get("is_registered", False)
                     and not d.get("is_premium", False)
                     and d.get("premium_status") != "PREMIUM"
                     and not is_mock
-                )
+                ):
+                    return False
+
+                # Part 1 & 45: Fail-closed Atom Domain Appraisal Gate
+                atom_required = os.getenv("ATOM_REQUIRED_FOR_FINAL", "true").lower() == "true"
+                if atom_required:
+                    atom_status = str(d.get("atom_status") or "").strip().upper()
+                    if atom_status != "SUCCESS":
+                        return False
+                    min_score = float(os.getenv("ATOM_MIN_DOMAIN_SCORE", "8.0"))
+                    atom_score = d.get("atom_domain_score")
+                    if atom_score is None:
+                        return False
+                    try:
+                        if float(atom_score) < min_score:
+                            return False
+                    except (ValueError, TypeError):
+                        return False
+
+                return True
 
             verified_data = []
             if target_scan_id:
@@ -340,7 +482,21 @@ async def get_latest_domains():
                     item["domain_name"] = item["domain"]
 
             if not verified_data:
-                return {"status": "idle", "scan": None, "domains": []}
+                stats = latest.get("stats") or {} if latest else {}
+                return {
+                    "status": "completed" if latest else "idle",
+                    "scan": {
+                        "id": target_scan_id or (latest.get("scan_id") if latest else None),
+                        "completed_at": latest.get("run_date") if latest else None,
+                        "domains_found": 0,
+                        "concepts": latest.get("concepts", []) if latest else [],
+                        "stats": stats,
+                        "funnel": stats.get("funnel") or stats
+                    } if latest else None,
+                    "domains": [],
+                    "stats": stats,
+                    "funnel": stats.get("funnel") or stats
+                }
 
             latest_date_str = verified_data[0].get("created_at") or latest.get("run_date")
             return {
@@ -349,9 +505,13 @@ async def get_latest_domains():
                     "id": target_scan_id or verified_data[0].get("scan_id", "latest_verified_batch"),
                     "completed_at": latest_date_str,
                     "domains_found": len(verified_data),
-                    "concepts": latest.get("concepts", [])
+                    "concepts": latest.get("concepts", []),
+                    "stats": latest.get("stats"),
+                    "funnel": (latest.get("stats") or {}).get("funnel")
                 },
-                "domains": verified_data
+                "domains": verified_data,
+                "stats": latest.get("stats"),
+                "funnel": (latest.get("stats") or {}).get("funnel")
             }
         except Exception as e:
             logger.error(f"Failed to query latest domains from Supabase: {e}")
@@ -363,9 +523,13 @@ async def get_latest_domains():
                         "id": current_scan_id or "local_fallback_batch",
                         "completed_at": latest.get("run_date"),
                         "domains_found": len(verified),
-                        "concepts": latest.get("concepts", [])
+                        "concepts": latest.get("concepts", []),
+                        "stats": latest.get("stats"),
+                        "funnel": (latest.get("stats") or {}).get("funnel")
                     },
-                    "domains": verified
+                    "domains": verified,
+                    "stats": latest.get("stats"),
+                    "funnel": (latest.get("stats") or {}).get("funnel")
                 }
             return JSONResponse(status_code=500, content={"error": f"Query failed: {str(e)}"})
     else:
@@ -376,16 +540,49 @@ async def get_latest_domains():
                 return False
             if is_production_mode() and prov not in REAL_REGISTRY_PROVIDERS:
                 return False
-            return (
+            if not (
                 d.get("availability_status") == "AVAILABLE_STANDARD"
                 and not d.get("is_registered", False)
                 and not d.get("is_premium", False)
                 and d.get("premium_status") != "PREMIUM"
                 and not is_mock
-            )
+            ):
+                return False
+
+            # Part 1 & 45: Fail-closed Atom Domain Appraisal Gate
+            atom_required = os.getenv("ATOM_REQUIRED_FOR_FINAL", "true").lower() == "true"
+            if atom_required:
+                atom_status = str(d.get("atom_status") or "").strip().upper()
+                if atom_status != "SUCCESS":
+                    return False
+                min_score = float(os.getenv("ATOM_MIN_DOMAIN_SCORE", "8.0"))
+                atom_score = d.get("atom_domain_score")
+                if atom_score is None:
+                    return False
+                try:
+                    if float(atom_score) < min_score:
+                        return False
+                except (ValueError, TypeError):
+                    return False
+
+            return True
 
         if not latest or not latest.get("results"):
-            return {"status": "idle", "scan": None, "domains": []}
+            stats = latest.get("stats") or {} if latest else {}
+            return {
+                "status": "completed" if latest else "idle",
+                "scan": {
+                    "id": current_scan_id or (latest.get("scan_id") if latest else None),
+                    "completed_at": latest.get("run_date") if latest else None,
+                    "domains_found": 0,
+                    "concepts": latest.get("concepts", []) if latest else [],
+                    "stats": stats,
+                    "funnel": stats.get("funnel") or stats
+                } if latest else None,
+                "domains": [],
+                "stats": stats,
+                "funnel": stats.get("funnel") or stats
+            }
         verified = [d for d in latest.get("results", []) if is_verified_opportunity(d)]
         return {
             "status": "success",
@@ -393,9 +590,13 @@ async def get_latest_domains():
                 "id": current_scan_id or "local_json_batch",
                 "completed_at": latest.get("run_date"),
                 "domains_found": len(verified),
-                "concepts": latest.get("concepts", [])
+                "concepts": latest.get("concepts", []),
+                "stats": latest.get("stats"),
+                "funnel": (latest.get("stats") or {}).get("funnel")
             },
-            "domains": verified
+            "domains": verified,
+            "stats": latest.get("stats"),
+            "funnel": (latest.get("stats") or {}).get("funnel")
         }
 
 @app.get("/api/domains/status")
@@ -405,7 +606,9 @@ async def get_job_status():
     """
     state = get_job_state()
     current = state.get("current_job", {})
-    latest = state.get("latest_results", {})
+    latest = state.get("latest_results") or state.get("test_audit_results") or {}
+    stats = latest.get("stats") or {}
+    funnel = stats.get("funnel") or stats
     
     return {
         "status": current.get("status", "idle"),
@@ -421,7 +624,9 @@ async def get_job_status():
         "next_run": "Scheduled via APScheduler",
         "domains_found": len(latest.get("results", [])) if latest else 0,
         "job_id": current.get("job_id"),
-        "error": current.get("error")
+        "error": current.get("error"),
+        "stats": stats,
+        "funnel": funnel
     }
 
 @app.post("/api/domains/run")
@@ -430,6 +635,7 @@ async def run_manual_job(background_tasks: BackgroundTasks):
     Phase 9 & 17: Manual domain hunt trigger.
     Shares the exact same pipeline as the daily scheduled run.
     Rejects duplicate execution with HTTP 409 if already running.
+    Part 6 & 35: Detects ATOM_REQUIRED_FOR_FINAL and warns if unconfigured.
     """
     if job_runner and job_runner.is_running:
         current = get_job_state().get("current_job", {})
@@ -443,12 +649,24 @@ async def run_manual_job(background_tasks: BackgroundTasks):
         )
         
     if job_runner:
+        atom_required = os.getenv("ATOM_REQUIRED_FOR_FINAL", "true").lower() == "true"
+        atom_configured = atom_service.is_configured()
+        atom_warning = None
+        if atom_required and not atom_configured:
+            atom_warning = "ATOM REQUIRED: Configure Atom API credentials before final opportunities can be published."
+            logger.warning(f"[RUN-GUARD] {atom_warning}")
+
         background_tasks.add_task(job_runner.run_domain_hunt, trigger="manual")
         job_id = str(int(time.time()))
-        return {
+        resp = {
             "status": "started",
-            "job_id": job_id
+            "job_id": job_id,
+            "atom_required": atom_required,
+            "atom_configured": atom_configured
         }
+        if atom_warning:
+            resp["atom_warning"] = atom_warning
+        return resp
         
     return JSONResponse(status_code=500, content={"status": "error", "message": "Job runner not initialized."})
 
